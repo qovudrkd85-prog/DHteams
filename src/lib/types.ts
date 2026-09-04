@@ -13,6 +13,16 @@ export interface Project {
   created_at: string;
 }
 
+export type MemberRole = "owner" | "editor" | "viewer";
+
+export interface ProjectMember {
+  project_id: string;
+  user_id: string;
+  email: string | null;
+  role: MemberRole;
+  created_at: string;
+}
+
 export interface TreeNode {
   id: string;
   project_id: string;

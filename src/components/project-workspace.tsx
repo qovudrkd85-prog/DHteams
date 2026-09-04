@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { useRouter } from "next/navigation";
+
 import { AppHeader } from "@/components/app-header";
 import { LogTable } from "@/components/log-table";
 import { NodeTree } from "@/components/node-tree";
@@ -25,7 +27,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
 import * as api from "@/lib/queries";
 import type { LogInput } from "@/lib/queries";
 import { buildTree, type FileLog, type NodeKind, type Project, type TreeNode } from "@/lib/types";
@@ -64,6 +68,11 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(true);
   const [nameDialog, setNameDialog] = useState<NameDialogState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [editForm, setEditForm] = useState<{ name: string; code: string; description: string } | null>(
+    null,
+  );
+  const [projectDeleteOpen, setProjectDeleteOpen] = useState(false);
+  const router = useRouter();
 
   const tree = useMemo(() => buildTree(nodes), [nodes]);
   const selectedNode = useMemo(
@@ -185,12 +194,82 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     }
   }
 
+  /** 드래그해서 다른 폴더로 옮기기 */
+  async function moveNodeTo(nodeId: string, parentId: string | null) {
+    const target = nodes.find((n) => n.id === nodeId);
+    if (!target || target.parent_id === parentId) return;
+
+    if (parentId && collectDescendantIds(nodes, nodeId).has(parentId)) {
+      toast.error("폴더를 자기 하위 폴더로 옮길 수 없습니다.");
+      return;
+    }
+
+    const previous = nodes;
+    setNodes((prev) => prev.map((n) => (n.id === nodeId ? { ...n, parent_id: parentId } : n)));
+    try {
+      await api.moveNode(nodeId, parentId);
+    } catch (error) {
+      setNodes(previous);
+      toast.error(errorMessage(error, "옮기지 못했습니다."));
+    }
+  }
+
+  async function saveProjectEdit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!editForm || !project) return;
+    try {
+      const updated = await api.updateProject(project.id, {
+        name: editForm.name.trim(),
+        code: editForm.code.trim() || null,
+        description: editForm.description.trim() || null,
+      });
+      setProject(updated);
+      setEditForm(null);
+      toast.success("과업 정보를 수정했습니다.");
+    } catch (error) {
+      toast.error(errorMessage(error, "수정하지 못했습니다."));
+    }
+  }
+
+  async function deleteWholeProject() {
+    if (!project) return;
+    try {
+      await api.deleteProject(project.id);
+      toast.success("과업을 삭제했습니다.");
+      router.replace("/");
+    } catch (error) {
+      toast.error(errorMessage(error, "삭제하지 못했습니다."));
+    }
+  }
+
   return (
     <>
       <AppHeader>
-        <span className="truncate text-sm text-muted-foreground">
-          {project ? `${project.name}${project.code ? ` · ${project.code}` : ""}` : ""}
-        </span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm text-muted-foreground">
+            {project ? `${project.name}${project.code ? ` · ${project.code}` : ""}` : ""}
+          </span>
+          {project ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setEditForm({
+                    name: project.name,
+                    code: project.code ?? "",
+                    description: project.description ?? "",
+                  })
+                }
+              >
+                과업 수정
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setProjectDeleteOpen(true)}>
+                과업 삭제
+              </Button>
+            </>
+          ) : null}
+        </div>
       </AppHeader>
 
       <main className="flex flex-1 flex-col gap-4 p-4 lg:flex-row">
@@ -230,6 +309,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
                 }
                 onRename={(node) => setNameDialog({ mode: "rename", target: node, value: node.name })}
                 onDelete={(node) => setDeleteTarget({ type: "node", node })}
+                onMove={moveNodeTo}
               />
             )}
           </ScrollArea>
@@ -322,6 +402,71 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
           <AlertDialogFooter>
             <AlertDialogCancel>취소</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDelete}>삭제</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 과업 정보 수정 */}
+      <Dialog open={editForm !== null} onOpenChange={(open) => !open && setEditForm(null)}>
+        <DialogContent>
+          <form onSubmit={saveProjectEdit}>
+            <DialogHeader>
+              <DialogTitle>과업 수정</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="p-name">과업명</Label>
+                <Input
+                  id="p-name"
+                  required
+                  value={editForm?.name ?? ""}
+                  onChange={(e) =>
+                    setEditForm((prev) => (prev ? { ...prev, name: e.target.value } : prev))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="p-code">과업번호</Label>
+                <Input
+                  id="p-code"
+                  value={editForm?.code ?? ""}
+                  onChange={(e) =>
+                    setEditForm((prev) => (prev ? { ...prev, code: e.target.value } : prev))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="p-desc">설명</Label>
+                <Textarea
+                  id="p-desc"
+                  value={editForm?.description ?? ""}
+                  onChange={(e) =>
+                    setEditForm((prev) => (prev ? { ...prev, description: e.target.value } : prev))
+                  }
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="submit" disabled={!editForm?.name.trim()}>
+                저장
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 과업 통째로 삭제 */}
+      <AlertDialog open={projectDeleteOpen} onOpenChange={setProjectDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>과업을 삭제할까요?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`"${project?.name ?? ""}" 의 모든 폴더·파일·이력이 함께 삭제됩니다. 되돌릴 수 없습니다.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={deleteWholeProject}>삭제</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

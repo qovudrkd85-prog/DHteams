@@ -170,3 +170,43 @@ create policy logs_write on public.file_logs
   for all
   using (exists (select 1 from public.nodes n where n.id = node_id and public.can_edit_project(n.project_id)))
   with check (exists (select 1 from public.nodes n where n.id = node_id and public.can_edit_project(n.project_id)));
+
+-- =====================================================================
+-- 4. 팀원 초대 (이메일로 멤버 추가 — auth.users 조회는 definer 함수로만)
+-- =====================================================================
+
+create or replace function public.add_project_member(
+  p_project uuid,
+  p_email   text,
+  p_role    text default 'editor'
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user  uuid;
+  v_email text := lower(trim(p_email));
+begin
+  if p_role not in ('editor', 'viewer') then
+    raise exception '권한은 editor 또는 viewer 만 가능합니다.';
+  end if;
+
+  if not exists (select 1 from public.projects p where p.id = p_project and p.owner_id = auth.uid()) then
+    raise exception '과업 소유자만 팀원을 추가할 수 있습니다.';
+  end if;
+
+  select u.id into v_user from auth.users u where lower(u.email) = v_email;
+  if v_user is null then
+    raise exception '아직 가입하지 않은 이메일입니다: %', v_email;
+  end if;
+
+  insert into public.project_members (project_id, user_id, email, role)
+  values (p_project, v_user, v_email, p_role)
+  on conflict (project_id, user_id) do update set role = excluded.role;
+end;
+$$;
+
+revoke all on function public.add_project_member(uuid, text, text) from public, anon;
+grant execute on function public.add_project_member(uuid, text, text) to authenticated;

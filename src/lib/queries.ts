@@ -1,5 +1,12 @@
 import { createClient } from "@/lib/supabase/client";
-import type { FileLog, NodeKind, Project, TreeNode } from "@/lib/types";
+import type {
+  FileLog,
+  MemberRole,
+  NodeKind,
+  Project,
+  ProjectMember,
+  TreeNode,
+} from "@/lib/types";
 
 function unwrap<T>(result: { data: T | null; error: { message: string } | null }): T {
   if (result.error) throw new Error(result.error.message);
@@ -26,10 +33,6 @@ export async function createProject(input: {
   description?: string;
 }): Promise<Project> {
   const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("로그인이 필요합니다.");
 
   return unwrap(
     await supabase
@@ -38,7 +41,7 @@ export async function createProject(input: {
         name: input.name.trim(),
         code: input.code?.trim() || null,
         description: input.description?.trim() || null,
-        owner_id: user.id,
+        owner_id: null,
       })
       .select()
       .single(),
@@ -79,9 +82,6 @@ export async function createNode(input: {
   name: string;
 }): Promise<TreeNode> {
   const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
   return unwrap(
     await supabase
@@ -91,7 +91,7 @@ export async function createNode(input: {
         parent_id: input.parentId,
         kind: input.kind,
         name: input.name.trim(),
-        created_by: user?.id ?? null,
+        created_by: null,
       })
       .select()
       .single(),
@@ -139,14 +139,11 @@ export type LogInput = Pick<
 
 export async function createLog(nodeId: string, input: LogInput): Promise<FileLog> {
   const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
   return unwrap(
     await supabase
       .from("file_logs")
-      .insert({ ...input, node_id: nodeId, created_by: user?.id ?? null })
+      .insert({ ...input, node_id: nodeId, created_by: null })
       .select()
       .single(),
   );
@@ -160,5 +157,43 @@ export async function updateLog(id: string, patch: Partial<LogInput>): Promise<F
 export async function deleteLog(id: string): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.from("file_logs").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+// ----------------------------------------------------------------- members
+
+export async function listMembers(projectId: string): Promise<ProjectMember[]> {
+  const supabase = createClient();
+  return unwrap(
+    await supabase
+      .from("project_members")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: true }),
+  );
+}
+
+/** 이미 가입한 사람만 추가 가능 (auth.users 조회는 서버 함수에서) */
+export async function addMemberByEmail(
+  projectId: string,
+  email: string,
+  role: Exclude<MemberRole, "owner">,
+): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.rpc("add_project_member", {
+    p_project: projectId,
+    p_email: email.trim(),
+    p_role: role,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function removeMember(projectId: string, userId: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("project_members")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("user_id", userId);
   if (error) throw new Error(error.message);
 }
