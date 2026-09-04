@@ -43,6 +43,8 @@ export interface FileLog {
   occurred_on: string;
   subject: string | null;
   detail: string | null;
+  /** DIDAS 업로드 완료 여부 */
+  didas_uploaded: boolean;
   created_at: string;
 }
 

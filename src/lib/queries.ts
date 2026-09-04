@@ -127,15 +127,17 @@ export async function listLogs(nodeId: string): Promise<FileLog[]> {
       .from("file_logs")
       .select("*")
       .eq("node_id", nodeId)
-      .order("occurred_on", { ascending: false })
-      .order("created_at", { ascending: false }),
+      // 오래된 것부터 — 1, 2, 3 순번이 변경 이력 순서와 맞도록
+      .order("occurred_on", { ascending: true })
+      .order("created_at", { ascending: true }),
   );
 }
 
 export type LogInput = Pick<
   FileLog,
   "action" | "actor" | "counterpart" | "occurred_on" | "subject" | "detail"
->;
+> &
+  Partial<Pick<FileLog, "didas_uploaded">>;
 
 export async function createLog(nodeId: string, input: LogInput): Promise<FileLog> {
   const supabase = createClient();

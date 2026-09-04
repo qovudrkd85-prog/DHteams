@@ -179,7 +179,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
         subject: null,
         detail: null,
       });
-      setLogs((prev) => [created, ...prev]);
+      setLogs((prev) => [...prev, created]);
     } catch (error) {
       toast.error(errorMessage(error, "행을 추가하지 못했습니다."));
     }

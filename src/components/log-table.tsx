@@ -4,6 +4,7 @@ import { Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -26,28 +27,30 @@ interface LogTableProps {
 export function LogTable({ logs, onPatch, onDelete }: LogTableProps) {
   return (
     <div className="overflow-x-auto rounded-lg border bg-background">
-      <Table className="min-w-[900px]">
+      <Table className="min-w-[1040px]">
         <TableHeader>
           <TableRow>
+            <TableHead className="w-[44px] text-center">순번</TableHead>
             <TableHead className="w-[96px]">구분</TableHead>
             <TableHead className="w-[140px]">언제</TableHead>
             <TableHead className="w-[110px]">누가</TableHead>
             <TableHead className="w-[130px]">상대(발신/수신)</TableHead>
             <TableHead className="w-[200px]">무엇을</TableHead>
             <TableHead>어떻게 수정했는지</TableHead>
+            <TableHead className="w-[92px] text-center">DIDAS 업로드</TableHead>
             <TableHead className="w-[44px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
           {logs.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+              <TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
                 기록이 없습니다. 아래 &ldquo;+ 행 추가&rdquo; 로 첫 이력을 남기세요.
               </TableCell>
             </TableRow>
           ) : (
-            logs.map((log) => (
-              <LogRow key={log.id} log={log} onPatch={onPatch} onDelete={onDelete} />
+            logs.map((log, index) => (
+              <LogRow key={log.id} seq={index + 1} log={log} onPatch={onPatch} onDelete={onDelete} />
             ))
           )}
         </TableBody>
@@ -57,12 +60,13 @@ export function LogTable({ logs, onPatch, onDelete }: LogTableProps) {
 }
 
 interface LogRowProps {
+  seq: number;
   log: FileLog;
   onPatch: (id: string, patch: Partial<LogInput>) => void;
   onDelete: (log: FileLog) => void;
 }
 
-function LogRow({ log, onPatch, onDelete }: LogRowProps) {
+function LogRow({ seq, log, onPatch, onDelete }: LogRowProps) {
   const [draft, setDraft] = useState({
     actor: log.actor ?? "",
     counterpart: log.counterpart ?? "",
@@ -78,6 +82,10 @@ function LogRow({ log, onPatch, onDelete }: LogRowProps) {
 
   return (
     <TableRow className="align-top">
+      <TableCell className="pt-3 text-center text-sm font-medium text-muted-foreground tabular-nums">
+        {seq}
+      </TableCell>
+
       <TableCell>
         <Select
           value={log.action}
@@ -143,6 +151,14 @@ function LogRow({ log, onPatch, onDelete }: LogRowProps) {
           value={draft.detail}
           onChange={(e) => setDraft({ ...draft, detail: e.target.value })}
           onBlur={() => commit("detail", log.detail)}
+        />
+      </TableCell>
+
+      <TableCell className="pt-3 text-center">
+        <Checkbox
+          checked={log.didas_uploaded ?? false}
+          onCheckedChange={(checked) => onPatch(log.id, { didas_uploaded: checked })}
+          aria-label="DIDAS 업로드 완료"
         />
       </TableCell>
 
