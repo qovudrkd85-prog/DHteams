@@ -1,36 +1,47 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DH Teams
 
-## Getting Started
+과업별로 폴더와 파일을 구성하고, 파일의 수신·수정·발송·확인 이력을 기록하는 웹 앱입니다.
 
-First, run the development server:
+## 기술 구성
+
+- Next.js 16 / React 19 / TypeScript
+- Tailwind CSS / shadcn UI
+- Supabase Auth / PostgreSQL / Row Level Security
+
+## 로컬 실행
+
+1. 의존성을 설치합니다.
+
+   ```bash
+   npm install
+   ```
+
+2. Supabase SQL Editor에서 [`supabase/schema.sql`](supabase/schema.sql)을 실행합니다.
+
+3. `.env.local.example`을 참고해 `.env.local`을 만듭니다.
+
+   ```env
+   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+   ```
+
+4. 개발 서버를 실행합니다.
+
+   ```bash
+   npm run dev
+   ```
+
+   브라우저에서 <http://localhost:3000>을 엽니다.
+
+## 검증 명령
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run lint
+npm run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 보안
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- 모든 업무 데이터 테이블에 RLS가 적용됩니다.
+- `.env.local`과 기타 `.env*` 파일은 Git에서 제외되며, `.env.local.example`만 추적합니다.
+- 클라이언트에는 Supabase Publishable key만 사용합니다. Secret key, service role key, 데이터베이스 비밀번호를 저장소에 추가하지 마세요.
