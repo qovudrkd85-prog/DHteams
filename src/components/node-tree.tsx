@@ -12,6 +12,13 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -56,26 +63,48 @@ export function NodeTree({ items, selectedId, ...actions }: NodeTreeProps) {
   }
 
   return (
-    <div
-      className={cn("min-h-full rounded-md", rootOver && "bg-accent/40 ring-1 ring-primary")}
-      onDragOver={(event) => {
-        if (event.dataTransfer.types.includes(DRAG_TYPE)) {
-          event.preventDefault();
-          setRootOver(true);
-        }
-      }}
-      onDragLeave={() => setRootOver(false)}
-      onDrop={handleRootDrop}
-    >
-      <ul className="space-y-0.5">
-        {items.map((item) => (
-          <NodeRow key={item.id} item={item} depth={0} selectedId={selectedId} {...actions} />
-        ))}
-      </ul>
-      <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">
-        드래그해서 폴더 안으로 넣기 · 빈 곳에 놓으면 최상위로
-      </p>
-    </div>
+    <ContextMenu>
+      <ContextMenuTrigger>
+        <div
+          className={cn(
+            "min-h-full rounded-md",
+            rootOver && "bg-accent/40 ring-1 ring-primary",
+          )}
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes(DRAG_TYPE)) {
+              event.preventDefault();
+              setRootOver(true);
+            }
+          }}
+          onDragLeave={() => setRootOver(false)}
+          onDrop={handleRootDrop}
+        >
+          <ul className="space-y-0.5">
+            {items.map((item) => (
+              <NodeRow
+                key={item.id}
+                item={item}
+                depth={0}
+                selectedId={selectedId}
+                {...actions}
+              />
+            ))}
+          </ul>
+          <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+            우클릭으로 추가 · 드래그해서 폴더 안으로 넣기 · 빈 곳에 놓으면
+            최상위로
+          </p>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={() => actions.onAddChild(null, "folder")}>
+          최상위 폴더 추가
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => actions.onAddChild(null, "file")}>
+          최상위 파일 추가
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -109,89 +138,139 @@ function NodeRow({ item, depth, selectedId, ...actions }: NodeRowProps) {
 
   return (
     <li>
-      <div
-        draggable
-        onDragStart={(event) => {
-          event.dataTransfer.setData(DRAG_TYPE, item.id);
-          event.dataTransfer.effectAllowed = "move";
-        }}
-        onDragOver={(event) => {
-          if (!event.dataTransfer.types.includes(DRAG_TYPE)) return;
-          event.preventDefault();
-          event.stopPropagation();
-          event.dataTransfer.dropEffect = "move";
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        className={cn(
-          "group flex items-center gap-1 rounded-md pr-1 text-sm hover:bg-accent",
-          isSelected && "bg-accent font-medium",
-          dragOver && "ring-1 ring-primary bg-accent",
-        )}
-        style={{ paddingLeft: depth * 14 }}
-      >
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
-          onClick={() => {
-            if (isFolder) setExpanded((prev) => !prev);
-            actions.onSelect(item);
-          }}
-        >
-          <span className="w-4 shrink-0 text-muted-foreground">
-            {isFolder && childCount > 0 ? (
-              expanded ? (
-                <ChevronDown className="size-4" />
+      <ContextMenu>
+        <ContextMenuTrigger>
+          <div
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.setData(DRAG_TYPE, item.id);
+              event.dataTransfer.effectAllowed = "move";
+            }}
+            onDragOver={(event) => {
+              if (!event.dataTransfer.types.includes(DRAG_TYPE)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = "move";
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            className={cn(
+              "group flex items-center gap-1 rounded-md pr-1 text-sm hover:bg-accent",
+              isSelected && "bg-accent font-medium",
+              dragOver && "ring-1 ring-primary bg-accent",
+            )}
+            style={{ paddingLeft: depth * 14 }}
+          >
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
+              onClick={() => {
+                if (isFolder) setExpanded((prev) => !prev);
+                actions.onSelect(item);
+              }}
+            >
+              <span className="w-4 shrink-0 text-muted-foreground">
+                {isFolder && childCount > 0 ? (
+                  expanded ? (
+                    <ChevronDown className="size-4" />
+                  ) : (
+                    <ChevronRight className="size-4" />
+                  )
+                ) : null}
+              </span>
+              {isFolder ? (
+                expanded ? (
+                  <FolderOpen className="size-4 shrink-0 text-amber-500" />
+                ) : (
+                  <Folder className="size-4 shrink-0 text-amber-500" />
+                )
               ) : (
-                <ChevronRight className="size-4" />
-              )
-            ) : null}
-          </span>
-          {isFolder ? (
-            expanded ? (
-              <FolderOpen className="size-4 shrink-0 text-amber-500" />
-            ) : (
-              <Folder className="size-4 shrink-0 text-amber-500" />
-            )
-          ) : (
-            <FileText className="size-4 shrink-0 text-sky-500" />
-          )}
-          <span className="truncate">{item.name}</span>
-        </button>
+                <FileText className="size-4 shrink-0 text-sky-500" />
+              )}
+              <span className="truncate">{item.name}</span>
+            </button>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-6 shrink-0 opacity-0 group-hover:opacity-100 data-popup-open:opacity-100"
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 shrink-0 opacity-0 group-hover:opacity-100 data-popup-open:opacity-100"
+                  >
+                    <MoreHorizontal className="size-4" />
+                    <span className="sr-only">메뉴</span>
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end">
+                {isFolder ? (
+                  <>
+                    <DropdownMenuItem
+                      onClick={() => actions.onAddChild(item, "folder")}
+                    >
+                      하위 폴더 추가
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => actions.onAddChild(item, "file")}
+                    >
+                      파일 추가
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                ) : null}
+                <DropdownMenuItem onClick={() => actions.onRename(item)}>
+                  이름 변경
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => actions.onDelete(item)}
+                >
+                  삭제
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </ContextMenuTrigger>
+
+        <ContextMenuContent>
+          {isFolder ? (
+            <>
+              <ContextMenuItem
+                onClick={() => actions.onAddChild(item, "folder")}
               >
-                <MoreHorizontal className="size-4" />
-                <span className="sr-only">메뉴</span>
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end">
-            {isFolder ? (
-              <>
-                <DropdownMenuItem onClick={() => actions.onAddChild(item, "folder")}>
-                  하위 폴더 추가
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => actions.onAddChild(item, "file")}>
-                  파일 추가
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
-            ) : null}
-            <DropdownMenuItem onClick={() => actions.onRename(item)}>이름 변경</DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onClick={() => actions.onDelete(item)}>
-              삭제
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+                하위 폴더 추가
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => actions.onAddChild(item, "file")}>
+                파일 추가
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          ) : (
+            <>
+              <ContextMenuItem
+                onClick={() => actions.onAddChild(null, "folder")}
+              >
+                최상위 폴더 추가
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => actions.onAddChild(null, "file")}>
+                최상위 파일 추가
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          )}
+          <ContextMenuItem onClick={() => actions.onRename(item)}>
+            이름 변경
+          </ContextMenuItem>
+          <ContextMenuItem
+            variant="destructive"
+            onClick={() => actions.onDelete(item)}
+          >
+            삭제
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
 
       {isFolder && expanded && childCount > 0 ? (
         <ul className="space-y-0.5">

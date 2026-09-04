@@ -4,6 +4,7 @@ import type {
   MemberRole,
   NodeKind,
   Project,
+  Schedule,
   ProjectMember,
   TreeNode,
 } from "@/lib/types";
@@ -197,5 +198,82 @@ export async function removeMember(projectId: string, userId: string): Promise<v
     .delete()
     .eq("project_id", projectId)
     .eq("user_id", userId);
+  if (error) throw new Error(error.message);
+}
+
+// --------------------------------------------------------------- schedules
+
+export async function listSchedules(projectId: string): Promise<Schedule[]> {
+  const supabase = createClient();
+  return unwrap(
+    await supabase
+      .from("schedules")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("due_date", { ascending: true })
+      .order("created_at", { ascending: true }),
+  );
+}
+
+export type ScheduleInput = Pick<
+  Schedule,
+  "title" | "due_date" | "assignee" | "note" | "color" | "done"
+>;
+
+export async function createSchedule(
+  projectId: string,
+  input: Omit<ScheduleInput, "done"> & { done?: boolean },
+): Promise<Schedule> {
+  const supabase = createClient();
+  return unwrap(
+    await supabase
+      .from("schedules")
+      .insert({ ...input, project_id: projectId })
+      .select()
+      .single(),
+  );
+}
+
+export async function updateSchedule(
+  id: string,
+  patch: Partial<ScheduleInput>,
+): Promise<Schedule> {
+  const supabase = createClient();
+  return unwrap(await supabase.from("schedules").update(patch).eq("id", id).select().single());
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from("schedules").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+// ------------------------------------------------------------- month memo
+
+/** 과업 x 월 고정 메모. 없으면 빈 문자열 */
+export async function getMemo(projectId: string, month: string): Promise<string> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("project_memos")
+    .select("content")
+    .eq("project_id", projectId)
+    .eq("month", month)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.content ?? "";
+}
+
+export async function saveMemo(
+  projectId: string,
+  month: string,
+  content: string,
+): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("project_memos")
+    .upsert(
+      { project_id: projectId, month, content, updated_at: new Date().toISOString() },
+      { onConflict: "project_id,month" },
+    );
   if (error) throw new Error(error.message);
 }

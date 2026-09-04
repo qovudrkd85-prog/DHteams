@@ -75,3 +75,20 @@ export function buildTree(nodes: TreeNode[]): TreeItem[] {
 
   return sort(roots);
 }
+
+export type StickyColor = "yellow" | "pink" | "blue" | "green";
+
+export const STICKY_COLORS: StickyColor[] = ["yellow", "pink", "blue", "green"];
+
+/** 00_업무일정 — 과업별 달력에 붙는 포스트잇 */
+export interface Schedule {
+  id: string;
+  project_id: string;
+  title: string;
+  due_date: string;
+  assignee: string | null;
+  note: string | null;
+  color: StickyColor;
+  done: boolean;
+  created_at: string;
+}

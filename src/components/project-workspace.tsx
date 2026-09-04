@@ -5,9 +5,12 @@ import { toast } from "sonner";
 
 import { useRouter } from "next/navigation";
 
+import { CalendarDays } from "lucide-react";
+
 import { AppHeader } from "@/components/app-header";
 import { LogTable } from "@/components/log-table";
 import { NodeTree } from "@/components/node-tree";
+import { ScheduleCalendar } from "@/components/schedule-calendar";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,6 +34,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import * as api from "@/lib/queries";
+import { cn } from "@/lib/utils";
 import type { LogInput } from "@/lib/queries";
 import { buildTree, type FileLog, type NodeKind, type Project, type TreeNode } from "@/lib/types";
 
@@ -39,6 +43,9 @@ type NameDialogState =
   | { mode: "rename"; target: TreeNode; value: string };
 
 type DeleteTarget = { type: "node"; node: TreeNode } | { type: "log"; log: FileLog };
+
+/** 모든 과업에 기본으로 들어가는 고정 항목 (DB 노드가 아니라 화면 고정) */
+const SCHEDULE_ID = "__schedule__";
 
 const errorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
@@ -296,6 +303,18 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
               + 파일
             </Button>
           </div>
+          <button
+            type="button"
+            onClick={() => setSelectedId(SCHEDULE_ID)}
+            className={cn(
+              "mx-2 mt-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm hover:bg-accent",
+              selectedId === SCHEDULE_ID && "bg-accent font-medium",
+            )}
+          >
+            <CalendarDays className="size-4 shrink-0 text-rose-500" />
+            00_업무일정
+          </button>
+
           <ScrollArea className="max-h-[60vh] flex-1 p-2 lg:max-h-none">
             {loading ? (
               <p className="p-2 text-xs text-muted-foreground">불러오는 중...</p>
@@ -315,9 +334,11 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
           </ScrollArea>
         </section>
 
-        {/* 우: 선택한 파일의 이력 */}
+        {/* 우: 업무일정 달력 또는 선택한 파일의 이력 */}
         <section className="flex min-w-0 flex-1 flex-col gap-3">
-          {selectedNode && selectedNode.kind === "file" ? (
+          {selectedId === SCHEDULE_ID ? (
+            <ScheduleCalendar projectId={projectId} />
+          ) : selectedNode && selectedNode.kind === "file" ? (
             <>
               <div className="flex items-center justify-between">
                 <div className="min-w-0">
