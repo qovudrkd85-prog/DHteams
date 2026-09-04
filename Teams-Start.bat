@@ -3,7 +3,13 @@ setlocal
 chcp 65001 >nul
 title Teams - local server (do not close this window)
 
-cd /d "%~dp0teams" || goto :fail
+rem works whether this file sits inside the app folder or next to it
+cd /d "%~dp0" || goto :fail
+if not exist "package.json" cd /d "%~dp0teams" || goto :fail
+if not exist "package.json" (
+  echo [ERROR] package.json not found. Put this file in the app folder.
+  goto :fail
+)
 
 if not exist "node_modules" (
   echo [1/3] Installing packages. First run only, takes a few minutes...
