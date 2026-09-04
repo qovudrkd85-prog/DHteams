@@ -11,6 +11,7 @@ export interface Project {
   description: string | null;
   owner_id: string;
   created_at: string;
+  deleted_at?: string | null;
 }
 
 export type MemberRole = "owner" | "editor" | "viewer";
@@ -32,6 +33,7 @@ export interface TreeNode {
   note: string | null;
   sort_order: number;
   created_at: string;
+  deleted_at?: string | null;
 }
 
 export interface FileLog {
@@ -46,6 +48,7 @@ export interface FileLog {
   /** DIDAS 업로드 완료 여부 */
   didas_uploaded: boolean;
   created_at: string;
+  deleted_at?: string | null;
 }
 
 /** 트리 렌더링용 — nodes 배열을 부모/자식 구조로 묶은 형태 */
@@ -91,4 +94,5 @@ export interface Schedule {
   color: StickyColor;
   done: boolean;
   created_at: string;
+  deleted_at?: string | null;
 }

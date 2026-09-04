@@ -11,6 +11,7 @@ import { AppHeader } from "@/components/app-header";
 import { LogTable } from "@/components/log-table";
 import { NodeTree } from "@/components/node-tree";
 import { ScheduleCalendar } from "@/components/schedule-calendar";
+import { TrashDialog } from "@/components/trash-dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -79,6 +80,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     null,
   );
   const [projectDeleteOpen, setProjectDeleteOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   const router = useRouter();
 
   const tree = useMemo(() => buildTree(nodes), [nodes]);
@@ -157,7 +159,8 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     try {
       if (deleteTarget.type === "node") {
         const removedId = deleteTarget.node.id;
-        await api.deleteNode(removedId);
+        const removedIds = [...collectDescendantIds(nodes, removedId)];
+        await api.deleteNode(removedId, removedIds);
         setNodes((prev) => {
           const removed = collectDescendantIds(prev, removedId);
           return prev.filter((n) => !removed.has(n.id));
@@ -273,6 +276,9 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
               </Button>
               <Button variant="outline" size="sm" onClick={() => setProjectDeleteOpen(true)}>
                 과업 삭제
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setTrashOpen(true)}>
+                휴지통
               </Button>
             </>
           ) : null}
@@ -426,6 +432,15 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <TrashDialog
+        projectId={projectId}
+        open={trashOpen}
+        onOpenChange={setTrashOpen}
+        onRestored={async () => {
+          setNodes(await api.listNodes(projectId));
+        }}
+      />
 
       {/* 과업 정보 수정 */}
       <Dialog open={editForm !== null} onOpenChange={(open) => !open && setEditForm(null)}>

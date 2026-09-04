@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { AppHeader } from "@/components/app-header";
+import { TrashDialog } from "@/components/trash-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -31,6 +32,17 @@ export default function HomePage() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", code: "", description: "" });
   const [busy, setBusy] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
+
+  const reload = useCallback(async () => {
+    try {
+      setProjects(await listProjects());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "과업을 불러오지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -38,24 +50,8 @@ export default function HomePage() {
       return;
     }
 
-    let cancelled = false;
-    listProjects()
-      .then((rows) => {
-        if (!cancelled) setProjects(rows);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          toast.error(error instanceof Error ? error.message : "과업을 불러오지 못했습니다.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
+    void reload();
+  }, [router, reload]);
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();
@@ -85,6 +81,8 @@ export default function HomePage() {
             </p>
           </div>
 
+          <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setTrashOpen(true)}>휴지통</Button>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger render={<Button>+ 새 과업</Button>} />
             <DialogContent>
@@ -130,6 +128,7 @@ export default function HomePage() {
               </form>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
 
         {loading ? (
@@ -162,6 +161,7 @@ export default function HomePage() {
           </div>
         )}
       </main>
+      <TrashDialog open={trashOpen} onOpenChange={setTrashOpen} onRestored={reload} />
     </>
   );
 }
