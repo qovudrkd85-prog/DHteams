@@ -1,6 +1,9 @@
 import { createBrowserClient } from "@supabase/ssr";
 
-export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+// Vercel 환경변수 누락 대비 기본값 (브라우저에 노출되는 공개 값)
+const FALLBACK_URL = "https://yquxrohbiplkrtupkndo.supabase.co";
+
+export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || FALLBACK_URL;
 export const SUPABASE_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "";
 
