@@ -46,20 +46,13 @@ const DRAG_TYPE = "application/x-teams-node";
 
 export function NodeTree({ items, selectedId, ...actions }: NodeTreeProps) {
   const [rootOver, setRootOver] = useState(false);
+  const [contextNode, setContextNode] = useState<TreeNode | null>(null);
 
   function handleRootDrop(event: React.DragEvent) {
     event.preventDefault();
     setRootOver(false);
     const id = event.dataTransfer.getData(DRAG_TYPE);
     if (id) actions.onMove(id, null);
-  }
-
-  if (items.length === 0) {
-    return (
-      <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-        폴더나 파일을 추가하세요.
-      </p>
-    );
   }
 
   return (
@@ -78,18 +71,34 @@ export function NodeTree({ items, selectedId, ...actions }: NodeTreeProps) {
           }}
           onDragLeave={() => setRootOver(false)}
           onDrop={handleRootDrop}
+          onContextMenu={(event) => {
+            const target = event.target;
+            if (
+              !(target instanceof Element) ||
+              !target.closest("[data-node-tree-row]")
+            ) {
+              setContextNode(null);
+            }
+          }}
         >
-          <ul className="space-y-0.5">
-            {items.map((item) => (
-              <NodeRow
-                key={item.id}
-                item={item}
-                depth={0}
-                selectedId={selectedId}
-                {...actions}
-              />
-            ))}
-          </ul>
+          {items.length > 0 ? (
+            <ul className="space-y-0.5">
+              {items.map((item) => (
+                <NodeRow
+                  key={item.id}
+                  item={item}
+                  depth={0}
+                  selectedId={selectedId}
+                  onContextNode={setContextNode}
+                  {...actions}
+                />
+              ))}
+            </ul>
+          ) : (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+              폴더나 파일을 추가하세요.
+            </p>
+          )}
           <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">
             우클릭으로 추가 · 드래그해서 폴더 안으로 넣기 · 빈 곳에 놓으면
             최상위로
@@ -97,12 +106,53 @@ export function NodeTree({ items, selectedId, ...actions }: NodeTreeProps) {
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onClick={() => actions.onAddChild(null, "folder")}>
-          최상위 폴더 추가
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => actions.onAddChild(null, "file")}>
-          최상위 파일 추가
-        </ContextMenuItem>
+        {contextNode ? (
+          <>
+            <ContextMenuItem
+              onClick={() =>
+                actions.onAddChild(
+                  contextNode.kind === "folder" ? contextNode : null,
+                  "folder",
+                )
+              }
+            >
+              {contextNode.kind === "folder"
+                ? "하위 폴더 추가"
+                : "최상위 폴더 추가"}
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={() =>
+                actions.onAddChild(
+                  contextNode.kind === "folder" ? contextNode : null,
+                  "file",
+                )
+              }
+            >
+              {contextNode.kind === "folder"
+                ? "파일 추가"
+                : "최상위 파일 추가"}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={() => actions.onRename(contextNode)}>
+              이름 변경
+            </ContextMenuItem>
+            <ContextMenuItem
+              variant="destructive"
+              onClick={() => actions.onDelete(contextNode)}
+            >
+              삭제
+            </ContextMenuItem>
+          </>
+        ) : (
+          <>
+            <ContextMenuItem onClick={() => actions.onAddChild(null, "folder")}>
+              최상위 폴더 추가
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => actions.onAddChild(null, "file")}>
+              최상위 파일 추가
+            </ContextMenuItem>
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -112,9 +162,16 @@ interface NodeRowProps extends NodeTreeActions {
   item: TreeItem;
   depth: number;
   selectedId: string | null;
+  onContextNode: (node: TreeNode) => void;
 }
 
-function NodeRow({ item, depth, selectedId, ...actions }: NodeRowProps) {
+function NodeRow({
+  item,
+  depth,
+  selectedId,
+  onContextNode,
+  ...actions
+}: NodeRowProps) {
   const [expanded, setExpanded] = useState(true);
   const [dragOver, setDragOver] = useState(false);
   const isFolder = item.kind === "folder";
@@ -138,30 +195,30 @@ function NodeRow({ item, depth, selectedId, ...actions }: NodeRowProps) {
 
   return (
     <li>
-      <ContextMenu>
-        <ContextMenuTrigger>
-          <div
-            draggable
-            onDragStart={(event) => {
-              event.dataTransfer.setData(DRAG_TYPE, item.id);
-              event.dataTransfer.effectAllowed = "move";
-            }}
-            onDragOver={(event) => {
-              if (!event.dataTransfer.types.includes(DRAG_TYPE)) return;
-              event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.dropEffect = "move";
-              setDragOver(true);
-            }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
-            className={cn(
-              "group flex items-center gap-1 rounded-md pr-1 text-sm hover:bg-accent",
-              isSelected && "bg-accent font-medium",
-              dragOver && "ring-1 ring-primary bg-accent",
-            )}
-            style={{ paddingLeft: depth * 14 }}
-          >
+      <div
+        data-node-tree-row
+        draggable
+        onContextMenu={() => onContextNode(item)}
+        onDragStart={(event) => {
+          event.dataTransfer.setData(DRAG_TYPE, item.id);
+          event.dataTransfer.effectAllowed = "move";
+        }}
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes(DRAG_TYPE)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+        className={cn(
+          "group flex items-center gap-1 rounded-md pr-1 text-sm hover:bg-accent",
+          isSelected && "bg-accent font-medium",
+          dragOver && "ring-1 ring-primary bg-accent",
+        )}
+        style={{ paddingLeft: depth * 14 }}
+      >
             <button
               type="button"
               className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
@@ -231,46 +288,7 @@ function NodeRow({ item, depth, selectedId, ...actions }: NodeRowProps) {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          </div>
-        </ContextMenuTrigger>
-
-        <ContextMenuContent>
-          {isFolder ? (
-            <>
-              <ContextMenuItem
-                onClick={() => actions.onAddChild(item, "folder")}
-              >
-                하위 폴더 추가
-              </ContextMenuItem>
-              <ContextMenuItem onClick={() => actions.onAddChild(item, "file")}>
-                파일 추가
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-            </>
-          ) : (
-            <>
-              <ContextMenuItem
-                onClick={() => actions.onAddChild(null, "folder")}
-              >
-                최상위 폴더 추가
-              </ContextMenuItem>
-              <ContextMenuItem onClick={() => actions.onAddChild(null, "file")}>
-                최상위 파일 추가
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-            </>
-          )}
-          <ContextMenuItem onClick={() => actions.onRename(item)}>
-            이름 변경
-          </ContextMenuItem>
-          <ContextMenuItem
-            variant="destructive"
-            onClick={() => actions.onDelete(item)}
-          >
-            삭제
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
+      </div>
 
       {isFolder && expanded && childCount > 0 ? (
         <ul className="space-y-0.5">
@@ -280,6 +298,7 @@ function NodeRow({ item, depth, selectedId, ...actions }: NodeRowProps) {
               item={child}
               depth={depth + 1}
               selectedId={selectedId}
+              onContextNode={onContextNode}
               {...actions}
             />
           ))}

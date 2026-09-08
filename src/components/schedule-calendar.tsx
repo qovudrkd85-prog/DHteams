@@ -185,6 +185,16 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
       (prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1),
     );
 
+  const openCreate = (dueDate: string) =>
+    setEdit({
+      mode: "create",
+      due_date: dueDate,
+      title: "",
+      assignee: "",
+      note: "",
+      color: "yellow",
+    });
+
   const todayKey = toKey(new Date());
 
   return (
@@ -246,9 +256,13 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
             <div
               key={key}
               className={cn(
-                "min-h-24 bg-background p-1 text-left align-top",
+                "group min-h-24 cursor-pointer bg-background p-1 text-left align-top transition-colors hover:bg-accent/40",
                 !inMonth && "bg-muted/40 text-muted-foreground",
+                key === todayKey &&
+                  "relative z-10 bg-primary/10 ring-2 ring-inset ring-primary/70 hover:bg-primary/15",
               )}
+              onClick={() => openCreate(key)}
+              title="빈 공간을 클릭해서 일정 추가"
             >
               <button
                 type="button"
@@ -256,16 +270,11 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
                   "mb-1 flex w-full items-center justify-between rounded px-1 text-[11px] hover:bg-accent",
                   key === todayKey && "font-bold text-primary",
                 )}
-                onClick={() =>
-                  setEdit({
-                    mode: "create",
-                    due_date: key,
-                    title: "",
-                    assignee: "",
-                    note: "",
-                    color: "yellow",
-                  })
-                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openCreate(key);
+                }}
+                aria-label={`${key} 일정 추가`}
                 title="클릭해서 일정 추가"
               >
                 <span>{date.getDate()}</span>
@@ -283,6 +292,7 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
                       COLOR_CLASS[item.color],
                       item.done && "opacity-60",
                     )}
+                    onClick={(event) => event.stopPropagation()}
                   >
                     <Checkbox
                       className="mt-0.5 size-3"
