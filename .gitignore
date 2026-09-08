@@ -42,3 +42,6 @@ next-env.d.ts
 
 # keep the sample env file tracked
 !.env.local.example
+
+# Local browser verification screenshots
+/artifacts/

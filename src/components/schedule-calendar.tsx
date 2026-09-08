@@ -56,8 +56,22 @@ function buildMonthCells(base: Date): Date[] {
 }
 
 type EditState =
-  | { mode: "create"; due_date: string; title: string; assignee: string; note: string; color: StickyColor }
-  | { mode: "edit"; target: Schedule; title: string; assignee: string; note: string; color: StickyColor };
+  | {
+      mode: "create";
+      due_date: string;
+      title: string;
+      assignee: string;
+      note: string;
+      color: StickyColor;
+    }
+  | {
+      mode: "edit";
+      target: Schedule;
+      title: string;
+      assignee: string;
+      note: string;
+      color: StickyColor;
+    };
 
 const errorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
@@ -68,15 +82,24 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
   const [edit, setEdit] = useState<EditState | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const reload = useCallback(async () => {
-    try {
-      setSchedules(await api.listSchedules(projectId));
-    } catch (error) {
-      toast.error(errorMessage(error, "일정을 불러오지 못했습니다. 일정 테이블 SQL을 실행했는지 확인하세요."));
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]);
+  const reload = useCallback(
+    () =>
+      api
+        .listSchedules(projectId)
+        .then(setSchedules)
+        .catch((error) => {
+          toast.error(
+            errorMessage(
+              error,
+              "일정을 불러오지 못했습니다. 일정 테이블 SQL을 실행했는지 확인하세요.",
+            ),
+          );
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [projectId],
+  );
 
   useEffect(() => {
     void reload();
@@ -122,7 +145,9 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
           note: edit.note.trim() || null,
           color: edit.color,
         });
-        setSchedules((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+        setSchedules((prev) =>
+          prev.map((s) => (s.id === updated.id ? updated : s)),
+        );
       }
       setEdit(null);
     } catch (error) {
@@ -132,11 +157,15 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
 
   async function toggleDone(schedule: Schedule) {
     const next = !schedule.done;
-    setSchedules((prev) => prev.map((s) => (s.id === schedule.id ? { ...s, done: next } : s)));
+    setSchedules((prev) =>
+      prev.map((s) => (s.id === schedule.id ? { ...s, done: next } : s)),
+    );
     try {
       await api.updateSchedule(schedule.id, { done: next });
     } catch (error) {
-      setSchedules((prev) => prev.map((s) => (s.id === schedule.id ? { ...s, done: !next } : s)));
+      setSchedules((prev) =>
+        prev.map((s) => (s.id === schedule.id ? { ...s, done: !next } : s)),
+      );
       toast.error(errorMessage(error, "저장하지 못했습니다."));
     }
   }
@@ -152,7 +181,9 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
   }
 
   const shiftMonth = (delta: number) =>
-    setMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1));
+    setMonth(
+      (prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1),
+    );
 
   const todayKey = toKey(new Date());
 
@@ -160,18 +191,34 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-semibold">00_업무일정</h2>
-        <span className="text-xs text-muted-foreground">남은 일 {todoCount}건</span>
+        <span className="text-xs text-muted-foreground">
+          남은 일 {todoCount}건
+        </span>
         <div className="flex-1" />
-        <Button variant="outline" size="icon" className="size-8" onClick={() => shiftMonth(-1)}>
+        <Button
+          variant="outline"
+          size="icon"
+          className="size-8"
+          onClick={() => shiftMonth(-1)}
+        >
           <ChevronLeft className="size-4" />
         </Button>
         <span className="w-28 text-center text-sm font-medium">
           {month.getFullYear()}년 {month.getMonth() + 1}월
         </span>
-        <Button variant="outline" size="icon" className="size-8" onClick={() => shiftMonth(1)}>
+        <Button
+          variant="outline"
+          size="icon"
+          className="size-8"
+          onClick={() => shiftMonth(1)}
+        >
           <ChevronRight className="size-4" />
         </Button>
-        <Button variant="outline" size="sm" onClick={() => setMonth(new Date())}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setMonth(new Date())}
+        >
           오늘
         </Button>
       </div>
@@ -222,7 +269,9 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
                 title="클릭해서 일정 추가"
               >
                 <span>{date.getDate()}</span>
-                <span className="text-muted-foreground opacity-0 group-hover:opacity-100">+</span>
+                <span className="text-muted-foreground opacity-0 group-hover:opacity-100">
+                  +
+                </span>
               </button>
 
               <div className="space-y-1">
@@ -243,7 +292,10 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
                     />
                     <button
                       type="button"
-                      className={cn("min-w-0 flex-1 truncate", item.done && "line-through")}
+                      className={cn(
+                        "min-w-0 flex-1 truncate",
+                        item.done && "line-through",
+                      )}
                       onClick={() =>
                         setEdit({
                           mode: "edit",
@@ -254,7 +306,11 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
                           color: item.color,
                         })
                       }
-                      title={item.assignee ? `${item.title} · ${item.assignee}` : item.title}
+                      title={
+                        item.assignee
+                          ? `${item.title} · ${item.assignee}`
+                          : item.title
+                      }
                     >
                       {item.title}
                     </button>
@@ -273,7 +329,8 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
         <h3 className="mb-2 text-sm font-medium">
           이번 달 할 일{" "}
           <span className="text-xs font-normal text-muted-foreground">
-            {monthItems.filter((s) => !s.done).length}건 남음 / 전체 {monthItems.length}건
+            {monthItems.filter((s) => !s.done).length}건 남음 / 전체{" "}
+            {monthItems.length}건
           </span>
         </h3>
         {monthItems.length === 0 ? (
@@ -311,7 +368,12 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
                     })
                   }
                 >
-                  <span className={cn("block truncate font-medium", item.done && "line-through")}>
+                  <span
+                    className={cn(
+                      "block truncate font-medium",
+                      item.done && "line-through",
+                    )}
+                  >
                     {item.title}
                   </span>
                   <span className="block text-[11px] opacity-70">
@@ -325,9 +387,14 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
         )}
       </section>
 
-      {loading ? <p className="text-xs text-muted-foreground">불러오는 중...</p> : null}
+      {loading ? (
+        <p className="text-xs text-muted-foreground">불러오는 중...</p>
+      ) : null}
 
-      <Dialog open={edit !== null} onOpenChange={(open) => !open && setEdit(null)}>
+      <Dialog
+        open={edit !== null}
+        onOpenChange={(open) => !open && setEdit(null)}
+      >
         <DialogContent>
           <form onSubmit={submitEdit}>
             <DialogHeader>
@@ -348,7 +415,9 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
                   placeholder="예) 중간보고서 발주처 제출"
                   value={edit?.title ?? ""}
                   onChange={(e) =>
-                    setEdit((prev) => (prev ? { ...prev, title: e.target.value } : prev))
+                    setEdit((prev) =>
+                      prev ? { ...prev, title: e.target.value } : prev,
+                    )
                   }
                 />
               </div>
@@ -360,7 +429,9 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
                   placeholder="예) 김주무관"
                   value={edit?.assignee ?? ""}
                   onChange={(e) =>
-                    setEdit((prev) => (prev ? { ...prev, assignee: e.target.value } : prev))
+                    setEdit((prev) =>
+                      prev ? { ...prev, assignee: e.target.value } : prev,
+                    )
                   }
                 />
               </div>
@@ -371,7 +442,9 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
                   id="s-note"
                   value={edit?.note ?? ""}
                   onChange={(e) =>
-                    setEdit((prev) => (prev ? { ...prev, note: e.target.value } : prev))
+                    setEdit((prev) =>
+                      prev ? { ...prev, note: e.target.value } : prev,
+                    )
                   }
                 />
               </div>
@@ -388,7 +461,9 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
                         COLOR_CLASS[color],
                         edit?.color === color && "ring-2 ring-primary",
                       )}
-                      onClick={() => setEdit((prev) => (prev ? { ...prev, color } : prev))}
+                      onClick={() =>
+                        setEdit((prev) => (prev ? { ...prev, color } : prev))
+                      }
                     >
                       {COLOR_LABEL[color]}
                     </button>

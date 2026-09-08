@@ -39,21 +39,41 @@ const daysLeft = (deletedAt: string) => {
   return Math.max(0, Math.ceil(TRASH_KEEP_DAYS - passed));
 };
 
-export function TrashDialog({ projectId, open, onOpenChange, onRestored }: TrashDialogProps) {
+export function TrashDialog({
+  projectId,
+  open,
+  onOpenChange,
+  onRestored,
+}: TrashDialogProps) {
   const [items, setItems] = useState<TrashItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      await purgeExpiredTrash();
-      setItems(projectId ? await listProjectTrash(projectId) : await listDeletedProjects());
-    } catch (error) {
-      toast.error(errorMessage(error, "휴지통을 불러오지 못했습니다. 휴지통 SQL을 실행했는지 확인하세요."));
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]);
+  const reload = useCallback(
+    () =>
+      purgeExpiredTrash()
+        .then(() =>
+          projectId ? listProjectTrash(projectId) : listDeletedProjects(),
+        )
+        .then(setItems)
+        .catch((error) => {
+          toast.error(
+            errorMessage(
+              error,
+              "휴지통을 불러오지 못했습니다. 휴지통 SQL을 실행했는지 확인하세요.",
+            ),
+          );
+        })
+        .finally(() => {
+          setLoading(false);
+        }),
+    [projectId],
+  );
+
+  const [wasOpen, setWasOpen] = useState(open);
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    if (open) setLoading(true);
+  }
 
   useEffect(() => {
     if (open) void reload();
@@ -85,18 +105,26 @@ export function TrashDialog({ projectId, open, onOpenChange, onRestored }: Trash
         <DialogHeader>
           <DialogTitle>휴지통</DialogTitle>
           <DialogDescription>
-            삭제한 항목은 {TRASH_KEEP_DAYS}일간 보관되고, 그 뒤 자동으로 완전히 사라집니다.
+            삭제한 항목은 {TRASH_KEEP_DAYS}일간 보관되고, 그 뒤 자동으로 완전히
+            사라집니다.
           </DialogDescription>
         </DialogHeader>
 
         {loading ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">불러오는 중...</p>
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            불러오는 중...
+          </p>
         ) : items.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">휴지통이 비어 있습니다.</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            휴지통이 비어 있습니다.
+          </p>
         ) : (
           <ul className="max-h-80 divide-y overflow-y-auto rounded-lg border">
             {items.map((item) => (
-              <li key={`${item.kind}-${item.id}`} className="flex items-center gap-2 px-3 py-2">
+              <li
+                key={`${item.kind}-${item.id}`}
+                className="flex items-center gap-2 px-3 py-2"
+              >
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{item.label}</p>
                   <p className="text-xs text-muted-foreground">
@@ -104,7 +132,12 @@ export function TrashDialog({ projectId, open, onOpenChange, onRestored }: Trash
                   </p>
                 </div>
                 <Badge variant="secondary">{daysLeft(item.deleted_at)}일</Badge>
-                <Button variant="ghost" size="icon" className="size-8" onClick={() => handleRestore(item)}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  onClick={() => handleRestore(item)}
+                >
                   <RotateCcw className="size-4" />
                   <span className="sr-only">복구</span>
                 </Button>
