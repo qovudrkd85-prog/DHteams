@@ -2,7 +2,7 @@
 
 ## 현재 준비 상태
 
-2026-09-17 사용자가 계정 업데이트를 Supabase SQL Editor에서 적용했습니다. **새 사무실 월드 SQL은 별도 수동 적용이 필요합니다.** SQL 파일 생성과 로컬 DB 테스트는 운영 DB를 변경하지 않습니다. 현재 계정 인증 설정은 `npm run deploy:check`로 확인하며, 공간 업데이트 적용 여부는 아래 절차로 확인합니다. 이 PC의 공개 키에는 SQL 관리 권한이 없습니다.
+2026-09-17 사용자가 계정 업데이트와 **`teams-office-world-upgrade.sql` 전체의 운영 적용 성공**을 Supabase SQL Editor에서 확인했습니다. 같은 날 `npm run deploy:check`에서 계정 준비, Email provider, 신규 가입, Confirm Email 비활성화, 익명 데이터 접근 차단이 모두 통과했습니다. SQL 파일 생성과 로컬 DB 테스트는 운영 DB를 변경하지 않습니다. 이 PC의 공개 키에는 SQL 관리 권한이 없습니다.
 
 ## 1. Supabase 적용
 
