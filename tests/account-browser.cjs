@@ -81,7 +81,8 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     await page.setViewportSize({ width: 390, height: 844 });
     await header.getByRole("button", { name: "내 설정", exact: true }).click();
     await dialog.waitFor();
-    await page.locator('[data-sonner-toast]').waitFor({ state: "hidden" });
+    await page.mouse.move(380, 830);
+    await page.waitForFunction(() => document.querySelectorAll('[data-sonner-toast]').length === 0);
     await page.screenshot({ path: "artifacts/account-settings-mobile.png", animations: "disabled" });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await dialog.getByRole("button", { name: "취소", exact: true }).click();
