@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const net = require("node:net");
 const root = path.resolve(__dirname, "..");
-const suites = ["account-browser.cjs", "department-dashboard.cjs", "team-workspace.cjs", "project-workspace.cjs"];
+const suites = ["account-browser.cjs", "department-dashboard.cjs", "team-workspace.cjs", "game-world.cjs", "project-workspace.cjs"];
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function freePort() {

@@ -133,12 +133,20 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     });
     await page.goto(baseURL);
     await page.getByRole("heading", { name: "함께 계획하는 하루" }).waitFor();
-    await page
-      .getByRole("button", { name: "일정 등록", exact: true })
-      .waitFor();
-    await page
-      .getByRole("button", { name: "회의 부서 주간회의", exact: false })
-      .waitFor();
+    const launcher = page.getByRole("button", { name: "일정 확인하기", exact: true });
+    const calendar = page.getByRole("dialog", { name: "우리 팀 공유 달력", exact: true });
+    const dialog = page.getByRole("dialog", { name: /^(새 부서 일정|부서 일정 수정)$/ });
+    async function openCalendar() {
+      await launcher.click();
+      await calendar.waitFor();
+      await page.getByRole("button", { name: "일정 등록", exact: true }).waitFor();
+    }
+    async function closeCalendar() {
+      await calendar.getByRole("button", { name: "달력 닫기", exact: true }).click();
+      await calendar.waitFor({ state: "hidden" });
+      await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "일정 확인하기");
+    }
+    assert.equal(await page.getByRole("region", { name: "부서 공유 달력", exact: true }).count(), 0);
     await page.getByLabel("과업 검색").fill("후포");
     assert.equal(await page.locator("aside a").count(), 1);
     assert.equal(
@@ -146,9 +154,37 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
       "/projects/p3",
     );
     await page.getByLabel("과업 검색").fill("");
+    await openCalendar();
+    await page.getByRole("button", { name: "회의 부서 주간회의", exact: false }).waitFor();
+    const calendarBox = await calendar.boundingBox();
+    assert.ok(calendarBox.width > 1300 && calendarBox.height > 900, "The calendar opens in a large desktop dialog.");
+    // Closing the launcher keeps month, category and author filters for next time.
+    await page.getByRole("button", { name: "다음 달", exact: true }).click();
+    const viewedMonth = await calendar.getByRole("heading", { name: /^\d{4}\. \d{2}$/ }).textContent();
+    await page.getByRole("button", { name: "업무", exact: true }).click();
+    await page.getByLabel("등록자", { exact: true }).selectOption("mine");
+    await closeCalendar();
+    assert.equal(await page.getByRole("region", { name: "부서 공유 달력", exact: true }).count(), 0);
+    await openCalendar();
+    assert.equal(await calendar.getByRole("heading", { name: /^\d{4}\. \d{2}$/ }).textContent(), viewedMonth);
+    assert.equal(await page.getByRole("button", { name: "업무", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await page.getByLabel("등록자", { exact: true }).inputValue(), "mine");
+    await page.getByRole("button", { name: "필터 초기화", exact: true }).click();
+    await page.getByRole("button", { name: "오늘", exact: true }).click();
+    await page.getByRole("button", { name: "회의 부서 주간회의", exact: false }).waitFor();
+    // Escape closes only the inner editor; focus returns to the calendar.
+    await page.getByRole("button", { name: "일정 등록", exact: true }).click();
+    await dialog.getByLabel("일정명", { exact: true }).fill("닫기 동작 확인");
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+    assert.equal(await calendar.isVisible(), true);
+    await page.waitForFunction(() => document.querySelector('[data-testid="team-calendar-dialog"]')?.contains(document.activeElement)).catch(async (error) => {
+      console.error("Nested dialog focus:", await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 1000)));
+      await page.screenshot({ path: "artifacts/calendar-focus-failure.png", fullPage: true });
+      throw error;
+    });
     // The signed-in account becomes the author; legacy events remain readable.
     await page.getByRole("button", { name: "일정 등록", exact: true }).click();
-    const dialog = page.getByRole("dialog");
     assert.equal(await dialog.getByLabel("유형", { exact: true }).inputValue(), "work");
     await dialog.getByLabel("일정명", { exact: true }).fill("금요일 부서 회식");
     await dialog.getByLabel("유형", { exact: true }).selectOption("dinner");
@@ -169,6 +205,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     // Another authenticated account can edit content without taking over authorship.
     accountState.useMember(1);
     await page.reload();
+    await openCalendar();
     await page.locator('button[title^="회식 · 금요일 부서 회식 ·"]').click();
     await dialog.getByText("등록자 김민수", { exact: true }).waitFor();
     await dialog
@@ -181,6 +218,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.equal(rows[1].creator_name, members[0].name);
     assert.equal(rows[1].creator_color, members[0].color);
     await page.reload();
+    await openCalendar();
     await page.locator('button[title^="회식 · 부서 회식 장소 변경 ·"]').waitFor();
     await page.locator('button[title^="회식 · 부서 회식 장소 변경 ·"]').click();
     await dialog.getByRole("button", { name: "삭제", exact: true }).click();
@@ -291,11 +329,19 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     );
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({
+      path: "artifacts/calendar-desktop.png",
+      fullPage: true,
+    });
+    await closeCalendar();
+    await page.screenshot({
       path: "artifacts/dashboard-desktop.png",
       fullPage: true,
     });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
+    await launcher.waitFor();
+    await page.screenshot({ path: "artifacts/dashboard-mobile.png", fullPage: true });
+    await openCalendar();
     await page
       .getByRole("button", { name: "회의 부서 주간회의", exact: false })
       .waitFor();
@@ -307,7 +353,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     );
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({
-      path: "artifacts/dashboard-mobile.png",
+      path: "artifacts/calendar-mobile.png",
       fullPage: true,
     });
     // Another member's change becomes visible when returning to this window.
@@ -331,10 +377,11 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
         .isDisabled(),
       true,
     );
+    await closeCalendar();
     assert.equal(await page.locator("aside a").count(), 3);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: search/navigation links, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
+      "PASS: compact calendar launcher, preserved month/filters, nested editor focus, search/navigation links, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
       writes,
     );
   } finally {

@@ -11,13 +11,14 @@ import {
 const message = (error: unknown) => error instanceof Error ? error.message : "팀 정보를 불러오지 못했습니다.";
 
 export function useTeamWorkspace() {
-  const { account, settingsOpen: profileOpen, setSettingsOpen: setProfileOpen } = useAccount();
+  const { account, updateStatus, settingsOpen: profileOpen, setSettingsOpen: setProfileOpen } = useAccount();
   const [people, setMembers] = useState<TeamMember[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [today, setToday] = useState(() => officeDateKey());
   const [busy, setBusy] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
   const version = useRef(0);
   const mutating = useRef(false);
   const invalidate = useCallback(() => { ++version.current; }, []);
@@ -55,8 +56,12 @@ export function useTeamWorkspace() {
     };
   }, [refresh, invalidate]);
 
-  const currentMember = account?.member ?? null;
-  // Profile changes appear immediately everywhere while the shared roster refreshes.
+  const currentMember = useMemo(() => {
+    if (!account) return null;
+    const freshMember = people.find((person) => person.id === account.member.id);
+    // Session profile edits appear immediately; polling owns the latest shared status.
+    return { ...account.member, status_message: freshMember?.status_message ?? account.member.status_message ?? "" };
+  }, [account, people]);
   const members = useMemo(() => {
     if (!currentMember) return people;
     return people.some((person) => person.id === currentMember.id)
@@ -65,6 +70,22 @@ export function useTeamWorkspace() {
   }, [people, currentMember]);
   const todaysAttendance = attendance.filter((record) => record.work_date === today);
   const myAttendance = todaysAttendance.find((record) => record.member_id === currentMember?.id) ?? null;
+
+  const saveStatus = async (statusMessage: string) => {
+    if (!currentMember || mutating.current) throw new Error("이전 요청이 끝난 후 다시 시도해 주세요.");
+    mutating.current = true;
+    ++version.current;
+    setStatusBusy(true);
+    try {
+      const member = await updateStatus(statusMessage);
+      setMembers((previous) => previous.some((person) => person.id === member.id)
+        ? previous.map((person) => person.id === member.id ? member : person)
+        : [...previous, member]);
+    } finally {
+      mutating.current = false;
+      setStatusBusy(false);
+    }
+  };
 
   const markAttendance = async () => {
     if (!currentMember?.profile_completed || mutating.current || loading || error) return;
@@ -93,7 +114,7 @@ export function useTeamWorkspace() {
     }
   };
 
-  return { members, attendance: todaysAttendance, currentMember, myAttendance, loading, error, today, busy, profileOpen, setProfileOpen, refresh, markAttendance };
+  return { members, attendance: todaysAttendance, currentMember, myAttendance, loading, error, today, busy, statusBusy, profileOpen, setProfileOpen, refresh, markAttendance, saveStatus };
 }
 
 export type TeamWorkspaceState = ReturnType<typeof useTeamWorkspace>;

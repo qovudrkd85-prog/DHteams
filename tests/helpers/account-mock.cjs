@@ -8,12 +8,14 @@ async function installAccountMock(context, { members = [], authenticated = true 
     member.user_id ??= randomUUID();
     member.username ??= `member_${index + 1}`;
     member.profile_completed ??= true;
+    member.status_message ??= "";
     return { id: member.user_id, username: member.username, member, password: PASSWORD };
   });
   let current = authenticated ? accounts[0] ?? null : null;
   const state = {
     configured: true,
     failProfile: false,
+    failStatus: false,
     registrationAvailable: true,
     accounts,
     get account() { return current; },
@@ -39,7 +41,7 @@ async function installAccountMock(context, { members = [], authenticated = true 
     const input = route.request().postDataJSON();
     const username = input.username.trim().toLowerCase();
     if (accounts.some((account) => account.username === username)) return route.fulfill({ status: 409, json: { error: "이미 사용 중인 아이디입니다." } });
-    const member = { id: randomUUID(), user_id: randomUUID(), username, name: username, role: "", avatar: "🧑‍💻", color: "#547867", created_at: new Date().toISOString(), profile_completed: false };
+    const member = { id: randomUUID(), user_id: randomUUID(), username, name: username, role: "", avatar: "🧑‍💻", color: "#547867", status_message: "", created_at: new Date().toISOString(), profile_completed: false };
     members.push(member);
     current = { id: member.user_id, username, member, password: input.password };
     accounts.push(current);
@@ -58,6 +60,14 @@ async function installAccountMock(context, { members = [], authenticated = true 
     if (input.currentPassword !== current.password) return route.fulfill({ status: 400, json: { error: "현재 비밀번호가 맞지 않습니다." } });
     current.password = input.password;
     return route.fulfill({ json: { ok: true } });
+  });
+  await context.route("**/api/account/status", async (route) => {
+    if (!current) return route.fulfill({ status: 401, json: { error: "로그인이 필요합니다." } });
+    if (state.failStatus) return route.fulfill({ status: 503, json: { error: "상태 메시지 저장 연결 실패" } });
+    const input = route.request().postDataJSON();
+    if (typeof input.statusMessage !== "string" || Array.from(input.statusMessage.trim()).length > 60) return route.fulfill({ status: 400, json: { error: "상태 메시지는 60자 이내로 입력해 주세요." } });
+    current.member.status_message = input.statusMessage.trim();
+    return route.fulfill({ json: { member: current.member } });
   });
   return state;
 }

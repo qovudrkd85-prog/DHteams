@@ -101,6 +101,8 @@ export function DepartmentCalendar({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestVersion = useRef(0);
+  const editorOpener = useRef<HTMLElement | null>(null);
+  const createButton = useRef<HTMLButtonElement | null>(null);
   const cells = useMemo(() => monthCells(month), [month]);
   const first = dateKey(cells[0]);
   const last = dateKey(cells[41]);
@@ -178,6 +180,7 @@ export function DepartmentCalendar({
       onRegister?.();
       return;
     }
+    editorOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setConfirmDelete(false);
     setEditor({
       input: {
@@ -193,6 +196,7 @@ export function DepartmentCalendar({
     });
   }
   function edit(event: DepartmentEvent) {
+    editorOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setConfirmDelete(false);
     const {
       title,
@@ -319,6 +323,7 @@ export function DepartmentCalendar({
           </div>
         </div>
         <Button
+          ref={createButton}
           className={primary}
           onClick={() => create()}
           disabled={!!error || isLoading}
@@ -700,6 +705,7 @@ export function DepartmentCalendar({
         <DialogContent
           className="max-h-[90dvh] overflow-y-auto sm:max-w-lg"
           showCloseButton={!busy}
+          finalFocus={() => editorOpener.current?.isConnected && editorOpener.current.checkVisibility() ? editorOpener.current : createButton.current}
         >
           <form onSubmit={submit}>
             <DialogHeader>

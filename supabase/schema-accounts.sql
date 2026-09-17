@@ -1,5 +1,5 @@
 -- 아이디/비밀번호 계정, 본인 프로필, 로그인한 팀원 전용 공유 공간.
--- 기존 설치 SQL과 schema-team-workspace.sql을 적용한 뒤 이 파일을 마지막으로 실행하세요.
+-- 기존 설치 SQL과 schema-team-workspace.sql 다음에 실행하고, schema-office-presence.sql을 마지막으로 적용하세요.
 -- 기존 이름만 있는 팀원/일정은 보존합니다. 이름이 같아도 새 계정에 자동 연결하지 않습니다.
 -- 재실행 가능하며 비밀번호는 Supabase Auth에서만 관리합니다.
 begin;

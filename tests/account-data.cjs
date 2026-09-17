@@ -66,7 +66,8 @@ const outsiderId = "10000000-0000-0000-0000-000000000003";
     const migration = readSql("schema-accounts");
     execFileSync(process.execPath, [path.resolve(__dirname, "../scripts/prepare-account-upgrade.cjs")], { windowsHide: true, stdio: "pipe" });
     const bundle = fs.readFileSync(path.resolve(__dirname, "../artifacts/setup/teams-account-upgrade.sql"), "utf8");
-    await db.exec(bundle);
+    // Account-era permissions are verified before the additive office-world rules.
+    await db.exec(migration);
     await db.exec(migration);
     assert.deepEqual(await one("select * from team_members where id = $1", [legacy.id]), {
       ...legacy, user_id: null, username: null, profile_completed: false,
@@ -205,8 +206,9 @@ const outsiderId = "10000000-0000-0000-0000-000000000003";
     await db.exec("drop function public.add_project_member(uuid, text, text)");
     await db.exec(bundle);
     assert.equal((await one("select to_regprocedure('public.add_project_member(uuid, text, text)') is null as missing")).missing, true);
-    assert.deepEqual(await one("select * from team_members where id = $1", [alice.id]), beforeRerun);
+    assert.deepEqual(await one("select * from team_members where id = $1", [alice.id]), { ...beforeRerun, status_message: "" });
     assert.equal((await one("select count(*)::int as n from team_members")).n, 3);
+    assert.equal((await one("select count(*)::int as n from office_layouts where room_key is not null")).n, 6);
     const helpers = (await db.query("select proname, prosecdef, provolatile, proconfig from pg_proc where pronamespace = 'public'::regnamespace and proname in ('has_team_account', 'current_team_member_id') order by proname")).rows;
     assert.equal(helpers.length, 2);
     for (const helper of helpers) {

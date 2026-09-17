@@ -122,7 +122,7 @@ export function createAuthContext(request: NextRequest) {
       clearSessionCookies();
       throw new AccountError("로그인이 만료되었습니다. 다시 로그인해 주세요.", 401);
     }
-    const { data: member, error: profileError } = await supabase.from("team_members").select("id,user_id,username,name,role,avatar,color,profile_completed,created_at").eq("user_id", data.user.id).maybeSingle();
+    const { data: member, error: profileError } = await supabase.from("team_members").select("id,user_id,username,name,role,avatar,color,status_message,profile_completed,created_at").eq("user_id", data.user.id).maybeSingle();
     if (profileError || !member?.username) throw new AccountError("계정 프로필을 불러오지 못했습니다. 계정 SQL 설치 상태를 확인해 주세요.", 503);
     return { id: data.user.id, username: member.username, member: member as TeamMember };
   };

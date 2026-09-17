@@ -1,7 +1,9 @@
 "use client";
 
-import { LogIn, LogOut, Users, Check, RefreshCw, Settings } from "lucide-react";
+import { useId, useState } from "react";
+import { LogIn, LogOut, Users, Check, RefreshCw, Settings, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { Attendance } from "@/lib/team/workspace";
 import type { TeamWorkspaceState } from "@/lib/team/use-team-workspace";
 import { cn } from "@/lib/utils";
@@ -11,6 +13,41 @@ function time(value: string) {
 }
 function status(record?: Attendance | null) {
   return record?.checked_out_at ? "퇴근" : record ? "근무 중" : "미출근";
+}
+
+function StatusEditor({ saved, disabled, onSave }: { saved: string; disabled: boolean; onSave: (value: string) => Promise<void> }) {
+  const id = useId();
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const value = draft ?? saved;
+  const save = async (next: string) => {
+    if (saving || disabled) return;
+    setSaving(true);
+    setError(null);
+    setNotice("");
+    try {
+      await onSave(next.trim());
+      setDraft(null);
+      setNotice(next.trim() ? "상태 메시지를 저장했어요." : "상태 메시지를 지웠어요.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "상태 메시지를 저장하지 못했습니다. 다시 시도해 주세요.");
+    } finally { setSaving(false); }
+  };
+  return (
+    <form className="mt-4 border-t border-teal-900/10 pt-3" onSubmit={(event) => { event.preventDefault(); void save(value); }}>
+      <label htmlFor={id} className="mb-2 flex items-center gap-1.5 text-xs font-medium text-teal-900"><MessageSquare className="size-3.5" />내 상태 메시지</label>
+      <Input id={id} value={value} maxLength={120} disabled={disabled || saving} placeholder="집중 작업 중 · 3시에 답할게요" aria-describedby={`${id}-count${error ? ` ${id}-error` : ""}`} aria-invalid={!!error} className="bg-white text-xs" onChange={(event) => { setDraft(Array.from(event.target.value).slice(0, 60).join("")); setError(null); setNotice(""); }} />
+      <div className="mt-2 flex items-center gap-2">
+        <span id={`${id}-count`} className="mr-auto text-[10px] text-slate-500">{Array.from(value).length}/60자</span>
+        <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs text-slate-500" disabled={disabled || saving || !saved} onClick={() => void save("")}>지우기</Button>
+        <Button type="submit" size="sm" className="h-7 bg-teal-800 px-3 text-xs text-white hover:bg-teal-900" disabled={disabled || saving || value.trim() === saved}>{saving ? "저장 중…" : "저장"}</Button>
+      </div>
+      {error && <p id={`${id}-error`} role="alert" className="mt-2 text-xs leading-5 text-red-700">{error}</p>}
+      <p role="status" className="mt-1 text-[10px] leading-5 text-teal-700">{notice || "팀원 목록과 내 캐릭터에서 함께 볼 수 있어요."}</p>
+    </form>
+  );
 }
 
 export function TeamPanel({ workspace: w }: { workspace: TeamWorkspaceState }) {
@@ -38,11 +75,12 @@ export function TeamPanel({ workspace: w }: { workspace: TeamWorkspaceState }) {
               <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{w.currentMember.name} <span className="text-xs font-normal text-teal-700">나</span></p><p className="mt-1 truncate text-xs text-slate-500">{w.currentMember.role || "팀원"}</p></div>
               <span className="shrink-0 text-xs text-teal-800">{status(w.myAttendance)}</span>
             </div>
-            <Button className="mt-4 w-full bg-teal-800 text-white hover:bg-teal-900" disabled={w.busy || !w.currentMember.profile_completed || !!w.myAttendance?.checked_out_at} onClick={() => void w.markAttendance()}>
+            <Button className="mt-4 w-full bg-teal-800 text-white hover:bg-teal-900" disabled={w.busy || w.statusBusy || !w.currentMember.profile_completed || !!w.myAttendance?.checked_out_at} onClick={() => void w.markAttendance()}>
               {w.myAttendance?.checked_out_at ? <Check className="size-4" /> : w.myAttendance ? <LogOut className="size-4" /> : <LogIn className="size-4" />}
               {w.busy ? "기록 중…" : w.myAttendance?.checked_out_at ? "오늘 퇴근 완료" : w.myAttendance ? "퇴근하기" : "출근하기"}
             </Button>
             {w.myAttendance && <p className="mt-2 text-center text-[11px] text-slate-500">출근 {time(w.myAttendance.checked_in_at)}{w.myAttendance.checked_out_at && ` · 퇴근 ${time(w.myAttendance.checked_out_at)}`}</p>}
+            <StatusEditor key={w.currentMember.id} saved={w.currentMember.status_message ?? ""} disabled={w.busy} onSave={w.saveStatus} />
             <button type="button" disabled={w.busy} className="mt-3 flex w-full items-center justify-center gap-1 text-xs text-slate-500 underline underline-offset-4" onClick={() => w.setProfileOpen(true)}><Settings className="size-3" />내 프로필 수정</button>
           </div>
         )}
@@ -53,7 +91,7 @@ export function TeamPanel({ workspace: w }: { workspace: TeamWorkspaceState }) {
               const record = w.attendance.find((row) => row.member_id === member.id);
               return <div key={member.id} className="flex items-center gap-2.5 rounded-lg py-2" data-member-id={member.id}>
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-full border-2 bg-slate-50 text-lg" style={{ borderColor: member.color }}>{member.avatar}</span>
-                <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-700">{member.name}{member.id === w.currentMember?.id && <span className="ml-1 text-teal-600">· 나</span>}</p><p className="truncate text-[10px] text-slate-400">{member.role || "팀원"}{record && ` · ${time(record.checked_in_at)} 출근`}{record?.checked_out_at && ` · ${time(record.checked_out_at)} 퇴근`}</p></div>
+                <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-700">{member.name}{member.id === w.currentMember?.id && <span className="ml-1 text-teal-600">· 나</span>}</p><p className="truncate text-[10px] text-slate-400">{member.role || "팀원"}{record && ` · ${time(record.checked_in_at)} 출근`}{record?.checked_out_at && ` · ${time(record.checked_out_at)} 퇴근`}</p>{member.status_message && <p className="mt-1 break-words text-[11px] leading-4 text-teal-800" title={member.status_message}>{member.status_message}</p>}</div>
                 <span className={cn("flex shrink-0 items-center gap-1 text-[11px]", record && !record.checked_out_at ? "text-teal-700" : "text-slate-400")}><span className={cn("size-1.5 rounded-full", record && !record.checked_out_at ? "bg-teal-500" : "bg-slate-300")} />{status(record)}</span>
               </div>;
             })}

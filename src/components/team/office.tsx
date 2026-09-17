@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 import {
   Armchair, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Coffee,
@@ -11,11 +11,16 @@ import { toast } from "sonner";
 import {
   deleteOfficeLayout, listOfficeLayouts, officeDateKey, saveOfficeLayout,
   OFFICE_HEIGHT, OFFICE_WIDTH,
-  type Attendance, type OfficeItem, type OfficeLayout, type TeamMember,
+  type Attendance, type OfficeItem, type OfficeLayout, type TeamMember, type OfficeDraft,
 } from "@/lib/team/workspace";
+import { claimOfficeSeat } from "@/lib/team/presence";
+import { useOfficePresence } from "@/lib/team/use-office-presence";
+import { roomPortals } from "@/lib/team/world";
+import { WalkingCharacter, StatusBubble } from "./character";
+import { WorldArt, WorldPortals } from "./world-art";
 import styles from "./office.module.css";
 
-type Draft = Pick<OfficeLayout, "name" | "theme" | "items">;
+type Draft = OfficeDraft;
 type Props = {
   members: TeamMember[];
   attendance: Attendance[];
@@ -53,7 +58,7 @@ function starter(): Draft {
 }
 
 function toDraft(layout: OfficeLayout): Draft {
-  return { name: layout.name, theme: layout.theme, items: layout.items.map((item) => ({ ...item })) };
+  return { name: layout.name, theme: layout.theme, canvas_width: layout.canvas_width ?? WIDTH, canvas_height: layout.canvas_height ?? HEIGHT, room_kind: layout.room_kind ?? "office", items: layout.items.map((item) => ({ ...item })) };
 }
 
 function preferredLayout(layouts: OfficeLayout[], currentId?: string): OfficeLayout | null {
@@ -64,14 +69,14 @@ function preferredLayout(layouts: OfficeLayout[], currentId?: string): OfficeLay
   return layouts.find((layout) => layout.id === preferred) ?? layouts[0] ?? null;
 }
 
-function clampPosition(item: OfficeItem, x: number, y: number, rotation = item.rotation) {
+function boundPosition(item: OfficeItem, x: number, y: number, rotation: OfficeItem["rotation"], width: number, height: number) {
   const size = FURNITURE[item.kind];
   const turned = rotation === 90 || rotation === 270;
   const halfWidth = (turned ? size.height : size.width) / 2;
   const halfHeight = (turned ? size.width : size.height) / 2;
   return {
-    x: Math.max(32 + halfWidth, Math.min(WIDTH - 32 - halfWidth, Math.round(x / 10) * 10)),
-    y: Math.max(45 + halfHeight, Math.min(HEIGHT - 66 - halfHeight, Math.round(y / 10) * 10)),
+    x: Math.max(32 + halfWidth, Math.min(width - 32 - halfWidth, Math.round(x / 10) * 10)),
+    y: Math.max(45 + halfHeight, Math.min(height - 66 - halfHeight, Math.round(y / 10) * 10)),
   };
 }
 
@@ -195,6 +200,21 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [today, setToday] = useState(() => officeDateKey());
   const [announcement, setAnnouncement] = useState("");
+  const [seatError, setSeatError] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(.85);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{ pointer: number; x: number; y: number; left: number; top: number } | null>(null);
+  const width = draft.canvas_width ?? WIDTH;
+  const height = draft.canvas_height ?? HEIGHT;
+  const obstacles = useMemo(() => {
+    if (original?.room_kind === "outdoor") return [
+      ...roomPortals(original, layouts).map((portal) => ({ x: portal.x - 130, y: portal.y - 235, width: 260, height: 218 })),
+      { x: (original.canvas_width ?? WIDTH) / 2 + 155, y: 735, width: 150, height: 70 },
+    ];
+    if (original?.room_kind === "cafe") return [{ x: (original.canvas_width ?? WIDTH) - 430, y: 100, width: 320, height: 145 }];
+    return [];
+  }, [original, layouts]);
+  const game = useOfficePresence({ member: currentMember, layout: original, paused: editing || busy || loading || Boolean(pending || loadError), viewportRef, obstacles });
   const dirty = editing && (!original || JSON.stringify(draft) !== JSON.stringify(toDraft(original)));
   const selected = draft.items.find((item) => item.id === selectedId);
   const memberById = new Map(members.map((member) => [member.id, member]));
@@ -203,6 +223,21 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
   const seatedIds = new Set(draft.items.filter((item) => item.kind === "desk" && item.member_id).map((item) => item.member_id));
   const unseated = members.filter((member) => !seatedIds.has(member.id));
   const desks = draft.items.filter((item) => item.kind === "desk");
+  const nearPortal = game.player && roomPortals(original, layouts).find((portal) => Math.hypot(portal.x - game.player!.x, portal.y - game.player!.y) < 115);
+  const ownSeat = desks.find((desk) => desk.member_id === currentMember?.id);
+  function clampPosition(item: OfficeItem, x: number, y: number, rotation = item.rotation) {
+    return boundPosition(item, x, y, rotation, width, height);
+  }
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !game.player || editing) return;
+    const x = game.player.x * zoom;
+    const y = game.player.y * zoom;
+    const edgeX = Math.min(180, viewport.clientWidth / 3);
+    const edgeY = Math.min(190, viewport.clientHeight / 3);
+    if (x < viewport.scrollLeft + edgeX || x > viewport.scrollLeft + viewport.clientWidth - edgeX) viewport.scrollLeft = x - viewport.clientWidth / 2;
+    if (y < viewport.scrollTop + edgeY || y > viewport.scrollTop + viewport.clientHeight - 90) viewport.scrollTop = y - viewport.clientHeight / 2;
+  }, [game.player, zoom, editing]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -262,7 +297,7 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
       } finally { refreshing = false; }
     };
     const onVisible = () => { void refresh(); };
-    const interval = window.setInterval(onVisible, 30_000);
+    const interval = window.setInterval(onVisible, 3_000);
     window.addEventListener("focus", onVisible);
     document.addEventListener("visibilitychange", onVisible);
     return () => {
@@ -315,7 +350,7 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
   }
 
   function removeSelected() {
-    if (!selected || busy) return;
+    if (!selected || busy || selected.member_id) return;
     setDraft((current) => ({ ...current, items: current.items.filter((item) => item.id !== selected.id) }));
     setSelectedId(null);
     setAnnouncement("가구를 배치도에서 뺐어요. 저장하면 반영됩니다.");
@@ -329,6 +364,9 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
 
   function startDrag(event: PointerEvent<SVGGElement>, item: OfficeItem) {
     if (event.button !== 0 || busy) return;
+    event.stopPropagation();
+    game.stopMovement();
+    event.currentTarget.focus();
     setSelectedId(item.id);
     if (!editing) return;
     const point = svgPoint(event);
@@ -412,7 +450,7 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
     if (action.kind === "reload") { await reload(); return; }
     if (action.kind === "new") {
       setOriginal(null);
-      setDraft({ name: `새 오피스 ${layouts.length + 1}`, theme: draft.theme, items: [] });
+      setDraft({ name: `새 오피스 ${layouts.length + 1}`, theme: draft.theme, canvas_width: 1600, canvas_height: 900, room_kind: "office", items: [] });
       setEditing(true);
     } else if (action.kind === "cancel") {
       const previous = original ?? layouts[0] ?? null;
@@ -430,8 +468,34 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
 
   function requestAction(action: PendingAction) {
     if (busy) return;
+    game.stopMovement();
+    setSeatError(null);
     if (dirty || action.kind === "delete") setPending(action);
     else void perform(action);
+  }
+
+  async function selectSeat(itemId: string | null) {
+    if (!original || !currentMember || busy || editing) return;
+    game.stopMovement();
+    setBusy(true);
+    setSeatError(null);
+    try {
+      const layout = await claimOfficeSeat(original.id, itemId);
+      setLayouts((rows) => rows.map((row) => row.id === layout.id ? layout : row));
+      setOriginal(layout);
+      setDraft(toDraft(layout));
+      // Reservation and posture are separate: a selected seat is kept while walking.
+      if (!itemId) game.stand();
+      toast.success(itemId ? "내 자리로 예약했어요. 자리에 앉거나 자유롭게 걸어 보세요." : "자리 예약을 해제했어요.");
+    } catch (error) { setSeatError(errorMessage(error)); }
+    finally { setBusy(false); }
+  }
+  function travel(id: string) { requestAction({ kind: "switch", id }); viewportRef.current?.focus({ preventScroll: true }); }
+  function centerPlayer() {
+    const viewport = viewportRef.current;
+    if (!viewport || !game.player) return;
+    viewport.scrollTo({ left: game.player.x * zoom - viewport.clientWidth / 2, top: game.player.y * zoom - viewport.clientHeight / 2 });
+    viewport.focus({ preventScroll: true });
   }
 
   const selectedMember = selected?.member_id ? memberById.get(selected.member_id) : undefined;
@@ -440,8 +504,8 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
       <div className={styles.header}>
         <div>
           <p className={styles.eyebrow}><Sparkles size={13} /> OUR LITTLE OFFICE</p>
-          <h2>같이 일하는 풍경<span className={styles.titleDot}>.</span></h2>
-          <p className={styles.description}>출근하면 내 자리에 쏙. 우리만의 공간을 함께 꾸며요.</p>
+          <h2>우리의 작은 동네<span className={styles.titleDot}>.</span></h2>
+          <p className={styles.description}>사무실에서 만나고, 마당을 걷고, 카페에서 잠깐 쉬어요.</p>
         </div>
         <div className={styles.liveBadge}><span />{membersLoading ? "출근 확인 중" : `${presentMembers.length}명 함께 일하는 중`}</div>
       </div>
@@ -461,6 +525,11 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
           </div>
         </div>
 
+        <nav className={styles.roomNav} aria-label="우리 동네 공간 이동">
+          {layouts.map((room) => <button key={room.id} type="button" aria-current={original?.id === room.id ? "location" : undefined} disabled={busy} onClick={() => travel(room.id)}><span aria-hidden="true">{room.room_kind === "outdoor" ? "🌳" : room.room_kind === "cafe" ? "☕" : "🏡"}</span>{room.name}</button>)}
+        </nav>
+        {seatError && <div className={styles.error} role="alert">{seatError}</div>}
+        {game.syncError && <div className={styles.error} role="status"><strong>위치 공유를 확인해 주세요.</strong><p>{game.syncError}</p></div>}
         {pending && <div className={styles.confirm} role="alert">
           <div><strong>{pending.kind === "delete" ? `‘${original?.name}’ 배치도를 삭제할까요?` : "아직 저장하지 않은 변경사항이 있어요."}</strong><p>{pending.kind === "delete" ? "이 배치도의 가구와 자리 배정이 함께 삭제돼요." : "변경사항을 버리고 이동하거나, 계속 꾸밀 수 있어요."}</p></div>
           <div><button type="button" className={styles.quietButton} onClick={() => setPending(null)}>계속 꾸미기</button><button type="button" className={styles.dangerButton} onClick={() => void perform(pending)}>{pending.kind === "delete" ? "배치도 삭제" : "변경 버리고 계속"}</button></div>
@@ -471,32 +540,29 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
         <div className={styles.workspace}>
           <div className={styles.sceneColumn}>
             <div className={`${styles.scene} ${styles[draft.theme] ?? ""} ${editing ? styles.editing : ""}`}>
-              <div className={styles.sceneNote}>{editing ? <><MousePointer2 size={12} /> 가구를 끌어서 배치하세요</> : <><span className={styles.tinyDot} /> {original ? "팀과 함께 쓰는 공간" : "저장 전 · 기본 배치 미리보기"}</>}</div>
-              <div className={styles.canvasScroll}>
-                <svg ref={svgRef} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className={styles.canvas} aria-label={`${draft.name} 배치도. ${desks.length}개 책상, 출근 ${presentMembers.length}명.`} onPointerDown={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}>
-                  <defs>
-                    <pattern id={`${patternId}floor`} width="100" height="40" patternUnits="userSpaceOnUse"><path d="M0 40H100M50 0V40" fill="none" stroke="var(--floor-line)" strokeWidth="1" /></pattern>
-                    <pattern id={`${patternId}grid`} width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="10" cy="10" r="1" fill="#59796735" /></pattern>
-                    <linearGradient id={`${patternId}sun`} x1="0" x2="1" y1="0" y2="1"><stop stopColor="#fffdf0" stopOpacity=".7" /><stop offset="1" stopColor="#fffdf0" stopOpacity="0" /></linearGradient>
-                  </defs>
-                  <g pointerEvents="none">
-                    <rect x="12" y="20" width="976" height="526" rx="20" fill="#293d2c12" />
-                    <rect x="8" y="8" width="984" height="526" rx="18" fill="var(--wall)" />
-                    <rect x="22" y="35" width="956" height="483" rx="10" fill="var(--floor)" stroke="var(--floor-edge)" strokeWidth="2" />
-                    <rect x="22" y="35" width="956" height="483" rx="10" fill={`url(#${patternId}floor)`} />
-                    <path d="M118 36h164l143 235H243zM363 36h163l143 235H488z" fill={`url(#${patternId}sun)`} />
-                    {[116, 361, 793].map((x) => <g key={x}><rect x={x} y="14" width="163" height="24" rx="4" fill="#f8f9ed" stroke="#a9bdb0" strokeWidth="2" /><rect x={x + 5} y="18" width="153" height="14" rx="2" fill="#bfdcdb" /><path d={`M${x + 54} 17v17M${x + 109} 17v17`} stroke="#f8f9ed" strokeWidth="4" /></g>)}
-                    <rect x="129" y="96" width="399" height="383" rx="35" fill="var(--rug)" opacity=".65" />
-                    <rect x="138" y="105" width="381" height="365" rx="29" fill="none" stroke="#ffffff65" strokeWidth="2" strokeDasharray="3 5" />
-                    <rect x="605" y="365" width="290" height="117" rx="48" fill="var(--lounge-rug)" opacity=".6" />
-                    <text x="331" y="118" textAnchor="middle" fontSize="10" letterSpacing="3" fill="var(--room-text)">MAKE GOOD THINGS</text>
-                    <text x="723" y="333" textAnchor="middle" fontSize="10" letterSpacing="3" fill="var(--room-text)">A LITTLE BREAK</text>
-                    <path d="M67 518h59" stroke="var(--floor)" strokeWidth="6" /><path d="M69 517v-47a47 47 0 0147 47" fill="none" stroke="#c0c5b5" strokeWidth="1.5" />
-                    {editing && <rect x="22" y="35" width="956" height="483" fill={`url(#${patternId}grid)`} />}
-                  </g>
+              <div className={styles.sceneNote}>{editing ? <><MousePointer2 size={12} /> 가구를 끌어서 배치하세요</> : <><span className={styles.tinyDot} /> {original ? `${draft.name} · 방향키로 산책해요` : "저장 전 · 기본 배치 미리보기"}</>}</div>
+              <div className={styles.cameraTools}><button type="button" aria-label="지도 축소" onClick={() => setZoom((z) => Math.max(.4, Math.round((z - .15) * 100) / 100))}>−</button><span>{Math.round(zoom * 100)}%</span><button type="button" aria-label="지도 확대" onClick={() => setZoom((z) => Math.min(1.4, Math.round((z + .15) * 100) / 100))}>+</button><button type="button" onClick={centerPlayer}>내 캐릭터로</button><button type="button" onClick={() => { const v = viewportRef.current; if (v) setZoom(Math.max(.25, Math.min(v.clientWidth / width, v.clientHeight / height))); }}>전체 보기</button></div>
+              <div ref={viewportRef} className={styles.canvasScroll} tabIndex={0} role="region" aria-label="방향키로 걷는 우리 동네" data-testid="office-game-world"
+                onKeyDown={(event) => {
+                  if (event.target === event.currentTarget && !editing && !busy && nearPortal && (event.key.toLowerCase() === "e" || event.key === "Enter")) {
+                    event.preventDefault(); travel(nearPortal.destination.id); return;
+                  }
+                  game.onKeyDown(event);
+                }} onKeyUp={game.onKeyUp}
+                onPointerDown={(event) => {
+                  if (!(event.target instanceof SVGSVGElement) || event.button !== 0) return;
+                  event.currentTarget.focus({ preventScroll: true }); setSelectedId(null);
+                  if (event.pointerType === "mouse") { panRef.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }; event.currentTarget.setPointerCapture(event.pointerId); }
+                }} onPointerMove={(event) => { const pan = panRef.current; if (!pan || pan.pointer !== event.pointerId) return; event.currentTarget.scrollLeft = pan.left - event.clientX + pan.x; event.currentTarget.scrollTop = pan.top - event.clientY + pan.y; }}
+                onPointerUp={() => { panRef.current = null; }} onPointerCancel={() => { panRef.current = null; }}>
+                <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} style={{ width: width * zoom, height: height * zoom }} className={styles.canvas} aria-label={`${draft.name} 배치도. ${desks.length}개 책상, 출근 ${presentMembers.length}명.`}>
+                  <WorldArt width={width} height={height} kind={draft.room_kind} patternId={patternId} editing={editing} />
+                  <WorldPortals room={original} rooms={layouts} onTravel={travel} disabled={editing || busy} />
                   {draft.items.map((item) => {
                     const member = item.member_id ? memberById.get(item.member_id) : undefined;
+                    const memberPresence = member?.id === currentMember?.id ? game.player : game.peers.find((row) => row.member_id === member?.id);
                     const present = Boolean(member && presentIds.has(member.id));
+                    const seated = Boolean(member && memberPresence?.motion === "seated" && memberPresence.layout_id === original?.id && memberPresence.member_id === item.member_id);
                     const own = Boolean(member && currentMember?.id === member.id);
                     const isSelected = selectedId === item.id;
                     const size = FURNITURE[item.kind];
@@ -506,39 +572,58 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
                     const label = item.kind === "desk" ? member?.name ?? (item.member_id ? "등록 해제된 팀원" : item.label || "빈 자리") : item.label;
                     return <g key={item.id} data-testid={`office-item-${item.id}`} data-kind={item.kind} data-member-id={item.member_id ?? ""} data-present={present} data-x={item.x} data-y={item.y} transform={`translate(${item.x} ${item.y})`} className={`${styles.furniture} ${isSelected ? styles.selectedFurniture : ""}`} role="button" tabIndex={0} aria-label={`${FURNITURE[item.kind].name}${label ? ` · ${label}` : ""}${member ? present ? " · 근무 중" : " · 자리 비움" : ""}${own ? " · 내 자리" : ""}`} aria-pressed={isSelected} onFocus={() => setSelectedId(item.id)} onPointerDown={(event) => startDrag(event, item)} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={() => { dragRef.current = null; }} onKeyDown={(event) => itemKeyDown(event, item)}>
                       <rect className={styles.selectionOutline} x={-w / 2 - 5} y={-h / 2 - 5} width={w + 10} height={h + 10} rx="15" fill={isSelected ? "#ffffff35" : own ? "#7dae9020" : "transparent"} stroke={isSelected ? "#3d7865" : own ? "#82aa91" : "transparent"} strokeWidth="2" strokeDasharray={isSelected ? "5 4" : undefined} />
-                      <g transform={`rotate(${item.rotation})`} pointerEvents="none"><FurnitureArt item={item} member={member} present={present} /></g>
+                      <g transform={`rotate(${item.rotation})`} pointerEvents="none"><FurnitureArt item={item} member={member} present={seated} /></g>
+                      {member && <StatusBubble message={member.status_message} y={item.y < 200 ? h / 2 + 150 : -h / 2 - 15} x={Math.max(110 - item.x, Math.min(width - 110 - item.x, 0))} />}
                       {label && <g transform={`translate(0 ${h / 2 + 12})`} pointerEvents="none">
                         <rect x={-Math.min(100, Math.max(37, label.length * 6 + (member ? 18 : 10)))} y="-11" width={Math.min(200, Math.max(74, label.length * 12 + (member ? 36 : 20)))} height="23" rx="11.5" fill={present ? "#fcfff8" : "#f6f5edae"} stroke={own ? "#75a08b" : "#d7dacd"} />
                         <text y="4" textAnchor="middle" fontSize="11" fontWeight={present || own ? "600" : "400"} fill={present ? "#355d4d" : "#81877d"}>{present ? "● " : member ? "○ " : ""}{label.length > 14 ? `${label.slice(0, 13)}…` : label}{own ? " · 나" : ""}</text>
                       </g>}
                     </g>;
                   })}
-                  {!draft.items.length && <g pointerEvents="none"><circle cx="500" cy="237" r="36" fill="#ffffffb0" /><text x="500" y="248" textAnchor="middle" fontSize="30">🪴</text><text x="500" y="302" textAnchor="middle" fontSize="17" fontWeight="600" fill="#4c6b56">첫 번째 책상을 놓아 볼까요?</text><text x="500" y="329" textAnchor="middle" fontSize="13" fill="#829082">오른쪽 가구를 눌러 새로운 공간을 시작하세요.</text></g>}
+                  {game.peers.filter((row) => row.motion !== "seated").sort((a, b) => a.y - b.y).map((row) => {
+                    const member = memberById.get(row.member_id);
+                    return member ? <WalkingCharacter key={row.member_id} member={member} presence={row} roomWidth={width} working={presentIds.has(member.id)} /> : null;
+                  })}
+                  {currentMember && game.player && (game.player.motion !== "seated" ? <WalkingCharacter member={currentMember} presence={game.player} roomWidth={width} own moving={game.moving} working={presentIds.has(currentMember.id)} /> : <g data-testid="office-player" data-x={game.player.x} data-y={game.player.y} data-room-id={game.player.layout_id} data-motion="seated" />)}
                 </svg>
               </div>
             </div>
-            <div className={styles.sceneFooter}><span><i className={styles.onlineDot} /> 근무 중 <i className={styles.offlineDot} /> 자리 비움</span><span>{editing ? "방향키 이동 · Shift 빠르게 · R 회전" : "자리를 누르면 팀원 정보를 볼 수 있어요"}</span></div>
+            <div className={styles.sceneFooter}><span><i className={styles.onlineDot} /> 근무 중 <i className={styles.offlineDot} /> 미출근·퇴근</span><span>{editing ? "가구 선택 후 방향키 이동 · Shift 빠르게 · R 회전" : "바닥 클릭 후 방향키 / WASD · 문 앞에서 E · 지도를 끌어 둘러보기"}</span></div>
+            {!editing && <div className={styles.gameControls}>
+              <div><strong>{game.player?.motion === "seated" ? "내 자리에서 쉬어 가요" : nearPortal ? `${nearPortal.destination.name} 입구` : "오늘은 어디서 일할까요?"}</strong><p>{game.player?.motion === "seated" ? "일어나 걸어도 자리 예약은 유지돼요." : "빈 책상을 누르면 내 자리로 선택할 수 있어요."}</p></div>
+              <div className={styles.gameActions}>{nearPortal && <button type="button" className={styles.primaryButton} disabled={busy} onClick={() => travel(nearPortal.destination.id)}>들어가기 · E</button>}{game.player?.motion === "seated" && <button type="button" className={styles.primaryButton} onClick={() => { game.stand(); viewportRef.current?.focus({ preventScroll: true }); }}>일어나기</button>}</div>
+              <div className={styles.directionPad} aria-label="캐릭터 이동 버튼">{([["up", "위", ArrowUp], ["left", "왼쪽", ArrowLeft], ["down", "아래", ArrowDown], ["right", "오른쪽", ArrowRight]] as const).map(([direction, label, Icon]) => <button key={direction} type="button" aria-label={`캐릭터 ${label}${direction === "left" || direction === "right" ? "으로" : "로"} 이동`} disabled={busy || !game.player} onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); game.startDirection(direction); }} onPointerUp={game.stopMovement} onPointerCancel={game.stopMovement} onLostPointerCapture={game.stopMovement} onKeyDown={(event) => { if (event.key === " " || event.key === "Enter") { event.preventDefault(); game.startDirection(direction); } }} onKeyUp={game.stopMovement} onBlur={game.stopMovement}><Icon size={18} /></button>)}</div>
+            </div>}
           </div>
 
           <aside className={styles.sidebar} aria-label={editing ? "공간 편집 도구" : "오피스 정보"}>
             {editing ? <>
               <div className={styles.field}><label htmlFor={`${patternId}name`}>배치도 이름</label><input id={`${patternId}name`} maxLength={60} value={draft.name} disabled={busy} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></div>
+              <div className={styles.field}><label htmlFor={`${patternId}size`}>공간 크기</label><select id={`${patternId}size`} disabled={busy} value={`${width}x${height}`} onChange={(event) => { const [w, h] = event.target.value.split("x").map(Number); if (draft.items.some((item) => item.x > w - 105 || item.y > h - 110)) { toast.error("가구를 안쪽으로 옮긴 뒤 공간을 줄여 주세요."); return; } setDraft({ ...draft, canvas_width: w, canvas_height: h }); }}>
+                {!["1000x560", "1600x900", "2200x1100"].includes(`${width}x${height}`) && <option value={`${width}x${height}`}>현재 크기 · {width} × {height}</option>}
+                <option value="1000x560">아담하게 · 1000 × 560</option><option value="1600x900">넓게 · 1600 × 900</option><option value="2200x1100">아주 넓게 · 2200 × 1100</option>
+              </select></div>
               <div className={styles.sidebarSection}><h3>오늘의 분위기</h3><div className={styles.themes}>{THEMES.map((theme) => <button key={theme.id} type="button" aria-label={theme.name} aria-pressed={draft.theme === theme.id} title={theme.name} className={styles.themeSwatch} style={{ backgroundColor: theme.color }} disabled={busy} onClick={() => setDraft({ ...draft, theme: theme.id })}>{draft.theme === theme.id && <Check size={15} />}</button>)}<span>{THEMES.find((theme) => theme.id === draft.theme)?.name}</span></div></div>
               <div className={styles.sidebarSection}><h3>가구 더하기 <span>{draft.items.length}/100</span></h3><div className={styles.inventory}>{Object.entries(FURNITURE).map(([kind, furniture]) => <button type="button" key={kind} aria-label={`${furniture.name} 추가`} disabled={busy || draft.items.length >= 100} onClick={() => addItem(kind as OfficeItem["kind"])}><furniture.icon size={20} strokeWidth={1.5} /><span>{furniture.name}</span><Plus size={12} /></button>)}</div></div>
               {selected ? <div className={styles.inspector}>
                 <h3><MousePointer2 size={14} /> {FURNITURE[selected.kind].name} 편집</h3>
                 <div className={styles.field}><label htmlFor={`${patternId}label`}>가구 이름</label><input id={`${patternId}label`} maxLength={40} placeholder={FURNITURE[selected.kind].name} value={selected.label} disabled={busy} onChange={(event) => patchItem(selected.id, { label: event.target.value })} /></div>
-                {selected.kind === "desk" && <div className={styles.field}><label htmlFor={`${patternId}seat`}>좌석 팀원</label><select id={`${patternId}seat`} value={selected.member_id ?? ""} disabled={busy || membersLoading} onChange={(event) => patchItem(selected.id, { member_id: event.target.value || null })}><option value="">빈 자리로 두기</option>{selected.member_id && !memberById.has(selected.member_id) && <option value={selected.member_id}>등록 해제된 팀원</option>}{members.map((member) => { const alreadySeated = draft.items.some((item) => item.id !== selected.id && item.member_id === member.id); return <option key={member.id} value={member.id} disabled={alreadySeated}>{member.avatar} {member.name}{alreadySeated ? " · 이미 배정됨" : ""}</option>; })}</select>{!members.length && <button type="button" className={styles.textButton} onClick={onRegister}>팀원부터 등록하기 <ArrowRight size={12} /></button>}</div>}
-                <div className={styles.itemActions}><button type="button" disabled={busy} onClick={rotateSelected}><RotateCw size={14} /> 회전</button><button type="button" className={styles.removeButton} disabled={busy} onClick={removeSelected}><Trash2 size={14} /> 빼기</button></div>
+                {selected.kind === "desk" && <p className={styles.smallText}>{selected.member_id ? `${selectedMember?.name ?? "팀원"}님의 예약 자리예요. 예약은 본인만 해제할 수 있어요.` : "저장한 뒤 빈 책상을 눌러 본인 자리를 선택하세요."}</p>}
+                <div className={styles.itemActions}><button type="button" disabled={busy} onClick={rotateSelected}><RotateCw size={14} /> 회전</button><button type="button" className={styles.removeButton} disabled={busy || Boolean(selected.member_id)} onClick={removeSelected}><Trash2 size={14} /> 빼기</button></div>
                 <div className={styles.moveControls} aria-label="선택한 가구 이동"><span>위치 이동</span>{[[ArrowLeft, -10, 0, "왼쪽"], [ArrowUp, 0, -10, "위"], [ArrowDown, 0, 10, "아래"], [ArrowRight, 10, 0, "오른쪽"]].map(([Icon, x, y, label]) => { const DirectionIcon = Icon as typeof ArrowLeft; return <button type="button" key={String(label)} aria-label={`${label}으로 이동`} disabled={busy} onClick={() => moveSelected(Number(x), Number(y))}><DirectionIcon size={13} /></button>; })}</div>
               </div> : <div className={styles.selectHint}><MousePointer2 size={20} /><p>가구를 선택해 이름을 붙이고<br />팀원의 자리를 정해 주세요.</p></div>}
-              {original && <button type="button" className={styles.deleteLayout} disabled={busy} onClick={() => requestAction({ kind: "delete" })}><Trash2 size={12} /> 이 배치도 삭제</button>}
+              {original && <><button type="button" className={styles.deleteLayout} disabled={busy || desks.some((desk) => desk.member_id !== null)} onClick={() => requestAction({ kind: "delete" })}><Trash2 size={12} /> 이 배치도 삭제</button>{desks.some((desk) => desk.member_id !== null) && <p className={styles.smallText}>자리 예약을 모두 해제하면 배치도를 삭제할 수 있어요.</p>}</>}
             </> : <>
               <p className={styles.sidebarEyebrow}>TODAY IN OFFICE</p><h3 className={styles.todayTitle}>각자의 자리, 함께하는 하루</h3>
               <div className={styles.statGrid}><div><strong>{membersLoading ? "—" : presentMembers.length}<small>명</small></strong><span>지금 근무 중</span></div><div><strong>{desks.filter((desk) => !desk.member_id).length}<small>석</small></strong><span>배정할 빈 자리</span></div></div>
-              {selectedMember ? <div className={styles.memberCard}><span className={styles.memberAvatar} style={{ backgroundColor: `${selectedMember.color}22` }}>{selectedMember.avatar}</span><div><strong>{selectedMember.name}{selectedMember.id === currentMember?.id && <em>나</em>}</strong><p>{selectedMember.role || "팀원"}</p><span className={styles.memberState}>{presentIds.has(selectedMember.id) ? "● 출근해서 일하는 중" : "○ 지금은 자리 비움"}</span></div></div> : selected && <div className={styles.selectionInfo}><strong>{selected.label || FURNITURE[selected.kind].name}</strong><p>{selected.kind === "desk" ? "공간 꾸미기에서 이 자리에 앉을 팀원을 정해 주세요." : "공간 꾸미기에서 위치와 이름을 바꿀 수 있어요."}</p></div>}
+              {selectedMember ? <div className={styles.memberCard}><span className={styles.memberAvatar} style={{ backgroundColor: `${selectedMember.color}22` }}>{selectedMember.avatar}</span><div><strong>{selectedMember.name}{selectedMember.id === currentMember?.id && <em>나</em>}</strong><p>{selectedMember.role || "팀원"}</p><span className={styles.memberState}>{presentIds.has(selectedMember.id) ? "● 출근해서 일하는 중" : "○ 미출근·퇴근"}</span>{selectedMember.status_message && <p>{selectedMember.status_message}</p>}</div></div> : selected && <div className={styles.selectionInfo}><strong>{selected.label || FURNITURE[selected.kind].name}</strong><p>{selected.kind === "desk" ? "아직 예약되지 않은 자리예요." : "공간 꾸미기에서 위치와 이름을 바꿀 수 있어요."}</p></div>}
+              {selected?.kind === "desk" && <div className={styles.seatActions}>
+                {!selected.member_id ? <button type="button" className={styles.primaryButton} disabled={busy || !original || !currentMember} onClick={() => void selectSeat(selected.id)}>내 자리로 선택</button> : selected.member_id === currentMember?.id ? <><button type="button" className={styles.primaryButton} disabled={busy || game.player?.motion === "seated"} onClick={() => { game.sit(selected); viewportRef.current?.focus({ preventScroll: true }); }}>자리에 앉기</button><button type="button" className={styles.quietButton} disabled={busy} onClick={() => void selectSeat(null)}>자리 예약 해제</button></> : <p className={styles.smallText}>{selectedMember?.name ?? "다른 팀원"}님의 자리 · 선택할 수 없어요.</p>}
+                {!original && <p className={styles.smallText}>먼저 배치도를 저장해 주세요.</p>}
+              </div>}
+              {ownSeat && selected?.id !== ownSeat.id && <button type="button" className={styles.quietButton} onClick={() => setSelectedId(ownSeat.id)}>내 예약 자리 보기</button>}
               <div className={styles.sidebarSection}><h3>자리를 기다리는 팀원 <span>{unseated.length}</span></h3>{membersLoading ? <p className={styles.smallText}>팀원을 확인하고 있어요.</p> : unseated.length ? <div className={styles.roster}>{unseated.map((member) => <span key={member.id} className={styles.memberChip} title={presentIds.has(member.id) ? "근무 중 · 자리 배정 필요" : "자리 배정 필요"}>{member.avatar} {member.name}{presentIds.has(member.id) && <i className={styles.onlineDot} />}</span>)}</div> : <p className={styles.smallText}>{members.length ? "모든 팀원에게 자리가 있어요. 🌿" : "첫 번째 팀원을 기다리고 있어요."}</p>}</div>
-              <div className={styles.welcomeCard}><span>🌱</span><h4>{currentMember ? "작은 공간, 우리 취향대로" : "반가워요, 새로운 팀원!"}</h4><p>{currentMember ? "책상과 식물을 더하고 내 자리를 정해 보세요. 출근하면 아바타가 나타나요." : "내 설정을 완료하고 출근을 눌러 보세요. 내 자리에서 함께 하루를 시작해요."}</p><button type="button" onClick={currentMember ? () => setEditing(true) : onRegister}>{currentMember ? "오피스 꾸미기" : "내 설정 열기"}<ArrowRight size={13} /></button></div>
+              <div className={styles.welcomeCard}><span>🌱</span><h4>{currentMember ? "우리 동네, 우리 취향대로" : "반가워요, 새로운 팀원!"}</h4><p>{currentMember ? "책상과 식물을 더하고 나만의 자리를 정해 보세요. 출퇴근은 내 출근 카드에서 기록해요." : "내 설정을 완료하고 우리 동네를 둘러보세요."}</p><button type="button" onClick={currentMember ? () => setEditing(true) : onRegister}>{currentMember ? "오피스 꾸미기" : "내 설정 열기"}<ArrowRight size={13} /></button></div>
               <div className={styles.officeSummary}><Users size={13} /> 팀원 {members.length}명 <span>·</span> 책상 {desks.length}개</div>
             </>}
           </aside>

@@ -22,6 +22,7 @@ const id = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0
     const db = {
       team_members: [{ id: id(1), name: "김서연", role: "설계팀", avatar: "👩‍💻", color: "#5B7FA6", created_at: stamp() }],
       team_attendance: [],
+      team_presence: [],
       office_layouts: [{ id: id(2), name: "우리의 첫 사무실", theme: "sage", updated_at: stamp(), items: [
         { id: "desk-one", kind: "desk", x: 270, y: 220, rotation: 0, label: "첫 번째 책상", member_id: null },
         { id: "desk-two", kind: "desk", x: 490, y: 220, rotation: 0, label: "서연의 책상", member_id: id(1) },
@@ -43,7 +44,7 @@ const id = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0
       if (operation === "gte") return row[key] >= value;
       return true;
     });
-    await installAccountMock(context, { members: db.team_members, authenticated: false });
+    const accountState = await installAccountMock(context, { members: db.team_members, authenticated: false });
     await context.route("**/rest/v1/**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -62,6 +63,13 @@ const id = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0
       }
       if (request.method() === "POST") {
         const body = request.postDataJSON();
+        if (table === "team_presence") {
+          assert.equal(body.member_id, accountState.account.member.id);
+          const saved = { ...body, updated_at: stamp() };
+          const previous = rows.findIndex((row) => row.member_id === body.member_id);
+          if (previous < 0) rows.push(saved); else rows[previous] = saved;
+          return route.fulfill({ json: saved });
+        }
         if (table === "team_attendance" && rows.some((row) => row.member_id === body.member_id && row.work_date === today)) return route.fulfill({ json: null });
         const row = { ...body, id: id(++sequence), created_at: stamp(), updated_at: stamp() };
         if (table === "team_attendance") Object.assign(row, { work_date: today, checked_in_at: new Date().toISOString(), checked_out_at: null });
@@ -94,6 +102,34 @@ const id = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0
     assert.ok(me.user_id);
     assert.equal(await page.evaluate(() => localStorage.getItem("teams-current-member")), null);
     assert.equal(me.color, "#C47B55");
+    const statusInput = panel.getByLabel("내 상태 메시지", { exact: true });
+    await statusInput.fill("집중 작업 중 · 3시에 답할게요");
+    accountState.failStatus = true;
+    await panel.getByRole("button", { name: "저장", exact: true }).click();
+    await panel.getByText("상태 메시지 저장 연결 실패", { exact: true }).waitFor();
+    assert.equal(await statusInput.inputValue(), "집중 작업 중 · 3시에 답할게요");
+    assert.equal(me.status_message, "");
+    accountState.failStatus = false;
+    await panel.getByRole("button", { name: "저장", exact: true }).click();
+    await panel.getByText("상태 메시지를 저장했어요.", { exact: true }).waitFor();
+    assert.equal(me.status_message, "집중 작업 중 · 3시에 답할게요");
+    await panel.locator(`[data-member-id="${me.id}"]`).getByText(me.status_message, { exact: true }).waitFor();
+    // Shared roster refresh must beat the older status in the session snapshot.
+    me.status_message = "다른 창에서 바꾼 상태";
+    db.team_members[0].status_message = "회의 중 · 잠시 후 돌아와요";
+    await panel.getByRole("button", { name: "출퇴근 새로고침", exact: true }).click();
+    await panel.locator(`[data-member-id="${id(1)}"]`).getByText("회의 중 · 잠시 후 돌아와요", { exact: true }).waitFor();
+    assert.equal(await statusInput.inputValue(), "다른 창에서 바꾼 상태");
+    await page.reload();
+    await statusInput.waitFor();
+    assert.equal(await statusInput.inputValue(), "다른 창에서 바꾼 상태");
+    await statusInput.fill("가".repeat(65));
+    assert.equal(Array.from(await statusInput.inputValue()).length, 60);
+    await panel.getByText("60/60자", { exact: true }).waitFor();
+    await panel.getByRole("button", { name: "지우기", exact: true }).click();
+    await panel.getByText("상태 메시지를 지웠어요.", { exact: true }).waitFor();
+    assert.equal(me.status_message, "");
+    assert.equal(await statusInput.inputValue(), "");
     failAttendance = true;
     await panel.getByRole("button", { name: "출근하기", exact: true }).click();
     await page.getByText("출퇴근 연결 실패", { exact: true }).waitFor();
@@ -108,8 +144,11 @@ const id = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0
     const office = page.getByRole("region", { name: "팀 오피스", exact: true });
     await office.waitFor();
     await office.getByRole("button", { name: "공간 꾸미기", exact: true }).click();
+    await page.getByTestId("office-item-desk-two").click();
+    assert.equal(await office.getByRole("button", { name: "빼기", exact: true }).isDisabled(), true);
+    assert.equal(await office.getByRole("button", { name: "이 배치도 삭제", exact: true }).isDisabled(), true);
+    assert.equal(await office.getByLabel("좌석 팀원").count(), 0, "Decoration must not offer identity or seat assignment for another member.");
     await page.getByTestId("office-item-desk-one").click();
-    await office.getByLabel("좌석 팀원").selectOption(me.id);
     await page.getByTestId("office-item-desk-one").focus();
     await page.keyboard.press("ArrowRight");
     const desk = page.getByTestId("office-item-desk-one");
@@ -121,13 +160,15 @@ const id = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0
     await office.getByRole("button", { name: "저장", exact: true }).click();
     await office.getByRole("button", { name: "공간 꾸미기", exact: true }).waitFor();
     const savedDesk = db.office_layouts[0].items.find((item) => item.id === "desk-one");
-    assert.equal(savedDesk.member_id, me.id);
+    assert.equal(savedDesk.member_id, null);
+    assert.equal(db.office_layouts[0].items.find((item) => item.id === "desk-two").member_id, id(1));
     assert.ok(savedDesk.x > 270);
     assert.ok(savedDesk.y > 220);
-    assert.equal(await desk.getAttribute("data-present"), "true");
     await page.reload();
     await panel.getByRole("button", { name: "퇴근하기", exact: true }).waitFor();
-    await page.waitForFunction(() => document.querySelector('[data-testid="office-item-desk-one"]')?.getAttribute("data-present") === "true");
+    await desk.waitFor();
+    assert.equal(Number(await desk.getAttribute("data-x")), savedDesk.x);
+    assert.equal(Number(await desk.getAttribute("data-y")), savedDesk.y);
     fs.mkdirSync(path.join(process.cwd(), "artifacts"), { recursive: true });
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: "artifacts/team-workspace-desktop.png", fullPage: true });
@@ -143,7 +184,6 @@ const id = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0
     await panel.getByRole("button", { name: "퇴근하기", exact: true }).click();
     await panel.getByRole("button", { name: "오늘 퇴근 완료", exact: true }).waitFor();
     assert.ok(db.team_attendance[0].checked_out_at);
-    assert.equal(await desk.getAttribute("data-present"), "false");
     assert.equal(attendanceWrites, 3);
     await office.getByRole("button", { name: "공간 꾸미기", exact: true }).click();
     await office.getByRole("button", { name: "책상 추가", exact: true }).click();
@@ -155,7 +195,8 @@ const id = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0
     await office.getByRole("button", { name: "저장", exact: true }).click();
     await office.getByRole("button", { name: "공간 꾸미기", exact: true }).waitFor();
     assert.equal(db.office_layouts[0].items.length, 5);
-    // Multiple floorplans, theme, rotation, duplicate seats, and unsaved-switch protection.
+    // Multiple floorplans, theme, rotation and unsaved-switch protection.
+    // The game-world suite separately covers authenticated seat claims and posture.
     await office.getByRole("button", { name: "배치도 추가", exact: true }).click();
     await office.getByLabel("배치도 이름", { exact: true }).fill("두 번째 공간");
     await office.getByRole("button", { name: "블루 스카이", exact: true }).click();
@@ -164,14 +205,13 @@ const id = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0
     await table.focus();
     await page.keyboard.press("r");
     await office.getByRole("button", { name: "책상 추가", exact: true }).click();
-    await office.getByLabel("좌석 팀원").selectOption(me.id);
     await office.getByRole("button", { name: "책상 추가", exact: true }).click();
-    assert.equal(await office.getByLabel("좌석 팀원").locator(`option[value="${me.id}"]`).isDisabled(), true);
     await office.getByRole("button", { name: "저장", exact: true }).click();
     await office.getByRole("button", { name: "공간 꾸미기", exact: true }).waitFor();
     const second = db.office_layouts.find((layout) => layout.name === "두 번째 공간");
     assert.equal(second.theme, "sky");
     assert.equal(second.items.find((item) => item.kind === "table").rotation, 90);
+    assert.equal(second.items.filter((item) => item.kind === "desk" && item.member_id === null).length, 2);
     await page.reload();
     await office.getByRole("button", { name: "공간 꾸미기", exact: true }).waitFor();
     assert.equal(await office.getByLabel("배치도 선택").inputValue(), second.id);
@@ -204,6 +244,6 @@ const id = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0
     await panel.getByText("팀 공간 저장소가 아직 준비되지 않았습니다.", { exact: false }).waitFor();
     assert.equal(await panel.getByRole("button", { name: "출근하기", exact: true }).count(), 0);
     assert.deepEqual(errors, []);
-    console.log("PASS: member identity, attendance/errors/midnight, seated characters, pointer/keyboard editing, multiple layouts/themes/rotation, duplicate seats, draft protection/conflicts, deletion, mobile width, missing storage.");
+    console.log("PASS: member identity, status save/retry/clear/limit/roster/persistence, attendance/errors/midnight, reserved seat protection, pointer/keyboard editing, multiple layouts/themes/rotation, draft protection/conflicts, empty-room deletion, mobile width, missing storage.");
   } finally { await browser.close(); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

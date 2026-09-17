@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { ArrowUpRight, FolderOpen, Search, Sprout } from "lucide-react";
 
 import { AppHeader } from "@/components/app-header";
-import { DepartmentCalendar } from "@/components/department-calendar";
+import { CalendarLauncher } from "@/components/team/calendar-launcher";
 import { TeamOffice } from "@/components/team/office";
 import { TeamPanel } from "@/components/team/panel";
 import { TrashDialog } from "@/components/trash-dialog";
@@ -98,7 +98,7 @@ export default function HomePage() {
       <AppHeader>
         <span className="text-xs text-slate-500">우리 부서의 업무 공간</span>
       </AppHeader>
-      <main className="mx-auto w-full max-w-[1600px] flex-1 px-3 py-6 sm:px-6 lg:px-10 lg:py-8">
+      <main className="mx-auto w-full max-w-[1900px] flex-1 px-3 py-6 sm:px-6 lg:px-10 lg:py-8">
         <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-teal-700">
@@ -112,7 +112,8 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <CalendarLauncher workspace={workspace} />
             <Button variant="outline" onClick={() => setTrashOpen(true)}>
               휴지통
             </Button>
@@ -181,18 +182,13 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_350px]">
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0 space-y-5">
             <TeamOffice
               members={workspace.members}
               attendance={workspace.attendance}
               currentMember={workspace.currentMember}
               loading={workspace.loading || !!workspace.error}
-              onRegister={() => workspace.setProfileOpen(true)}
-            />
-            <DepartmentCalendar
-              members={workspace.members}
-              currentMember={workspace.error ? null : workspace.currentMember}
               onRegister={() => workspace.setProfileOpen(true)}
             />
           </div>

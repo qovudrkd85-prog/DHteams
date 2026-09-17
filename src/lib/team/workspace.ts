@@ -13,6 +13,7 @@ export interface TeamMember {
   user_id?: string | null;
   username?: string | null;
   profile_completed?: boolean;
+  status_message?: string;
   name: string;
   role: string;
   avatar: string;
@@ -41,6 +42,21 @@ export interface OfficeLayout {
   theme: "sage" | "sand" | "sky";
   items: OfficeItem[];
   updated_at: string;
+  canvas_width?: number;
+  canvas_height?: number;
+  room_kind?: "office" | "outdoor" | "cafe";
+  room_key?: string | null;
+}
+
+export type OfficeDraft = Pick<OfficeLayout, "name" | "theme" | "items" | "canvas_width" | "canvas_height" | "room_kind">;
+export interface TeamPresence {
+  member_id: string;
+  layout_id: string | null;
+  x: number;
+  y: number;
+  facing: "up" | "down" | "left" | "right";
+  motion: "standing" | "seated";
+  updated_at?: string;
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -144,8 +160,12 @@ export async function checkOut(attendance: Attendance): Promise<Attendance> {
   throw new Error("출근 기록이 변경되었거나 삭제되었습니다. 새로고침한 뒤 다시 확인해 주세요.");
 }
 
-function layoutPayload(input: Pick<OfficeLayout, "name" | "theme" | "items">) {
+function layoutPayload(input: OfficeDraft) {
   const name = trimmedText(input.name, "배치도 이름", 60);
+  const width = input.canvas_width ?? OFFICE_WIDTH;
+  const height = input.canvas_height ?? OFFICE_HEIGHT;
+  if (!Number.isInteger(width) || width < 1000 || width > 2400 || !Number.isInteger(height) || height < 560 || height > 1200) throw new Error("공간 크기는 가로 1000~2400, 세로 560~1200 안에서 정해 주세요.");
+  if (!["office", "outdoor", "cafe"].includes(input.room_kind ?? "office")) throw new Error("공간 종류를 확인해 주세요.");
   if (!["sage", "sand", "sky"].includes(input.theme)) throw new Error("공간 테마를 다시 선택해 주세요.");
   if (!Array.isArray(input.items) || input.items.length > 100) throw new Error("가구는 배치도마다 최대 100개까지 배치할 수 있습니다.");
   const ids = new Set<string>();
@@ -157,7 +177,7 @@ function layoutPayload(input: Pick<OfficeLayout, "name" | "theme" | "items">) {
     if (!["desk", "table", "plant", "sofa", "board"].includes(item.kind)
       || ![0, 90, 180, 270].includes(item.rotation)
       || !Number.isFinite(item.x) || !Number.isFinite(item.y)
-      || item.x < 0 || item.x > OFFICE_WIDTH || item.y < 0 || item.y > OFFICE_HEIGHT) {
+      || item.x < 0 || item.x > width || item.y < 0 || item.y > height) {
       throw new Error("가구 종류나 위치를 확인해 주세요.");
     }
     if (item.member_id !== null) {
@@ -169,7 +189,7 @@ function layoutPayload(input: Pick<OfficeLayout, "name" | "theme" | "items">) {
     return { id, kind: item.kind, x: item.x, y: item.y, rotation: item.rotation,
       label: trimmedText(item.label, "가구 이름", 40, false), member_id: item.member_id };
   });
-  return { name, theme: input.theme, items };
+  return { name, theme: input.theme, items, canvas_width: width, canvas_height: height, room_kind: input.room_kind ?? "office" };
 }
 
 export async function listOfficeLayouts(): Promise<OfficeLayout[]> {
@@ -185,7 +205,7 @@ export async function listOfficeLayouts(): Promise<OfficeLayout[]> {
 }
 
 export async function saveOfficeLayout(
-  input: Pick<OfficeLayout, "name" | "theme" | "items">,
+  input: OfficeDraft,
   original?: OfficeLayout,
 ): Promise<OfficeLayout> {
   const payload = layoutPayload(input);

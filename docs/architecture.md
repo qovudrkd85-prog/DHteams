@@ -5,6 +5,9 @@
 `src/app/page.tsx`는 과업 목록과 팀 공간을 조합합니다.
 
 - `components/team/office.tsx`: SVG 캐릭터와 가구, 좌석 표시, 배치도 편집/저장. 그림 스타일은 같은 폴더의 `office.module.css`에 있습니다.
+- `components/team/character.tsx`, `world-art.tsx`: 걷는 캐릭터·상태 말풍선·건물·마당·출입구 그림.
+- `components/team/calendar-launcher.tsx`: 큰 달력 열기/닫기와 필터 유지.
+- `lib/team/use-office-presence.ts`, `presence.ts`, `world.ts`: 방향 입력·충돌·위치 동기화·자리 API·공간 연결.
 - `components/account/`: 가입/로그인, 필수 첫 프로필 설정, 내 설정, 계정 상태.
 - `components/team/panel.tsx`: 본인 출퇴근 버튼, 읽기 전용 팀원 목록과 상태.
 - `lib/team/use-team-workspace.ts`: 계정에 연결된 현재 프로필, 팀원·출퇴근 조회와 갱신, 중복 요청 보호.
@@ -35,6 +38,8 @@
 `lib/supabase/client.ts`는 항상 같은 출처의 `/api/db/[...path]`로 요청합니다. 프록시는 앱에서 사용하는 테이블만 허용하고, 검증한 사용자의 액세스 토큰으로 Supabase에 접근합니다. 익명 직접 연결이나 관리자 키 우회는 없습니다. 변경 요청은 Origin도 확인합니다.
 
 `schema-accounts.sql`의 가입 트리거가 Auth 계정과 팀원 프로필을 같은 트랜잭션으로 만듭니다. `user_id`와 `username`은 변경할 수 없습니다. RLS는 연결된 팀원만 공유 데이터에 접근하게 하고 프로필·출퇴근 변경은 본인에게만 허용합니다. 기존 작성자 기록은 유지합니다. 오래된 공용 `teams_sid` 쿠키는 인증으로 인정하지 않습니다.
+
+`schema-office-presence.sql`을 마지막으로 적용합니다. 상태 메시지는 `/api/account/status`, 자리 예약은 `/api/office/seat`가 검증된 계정으로 저장합니다. 자리 RPC는 해당 방 행을 잠그고 빈 책상인지 확인하며 일반 JSON 편집에도 타인 자리 보호 트리거가 적용됩니다. `team_presence`는 본인 행만 변경할 수 있습니다. 위치 저장과 자리 변경 사이 잠금 역전은 `FOR SHARE NOWAIT`와 제한된 전체 요청 재시도로 처리합니다.
 
 세션 쿠키에는 영구 만료 시간을 지정하지 않습니다. 새로고침은 로그인 상태를 유지하고 로그아웃은 쿠키와 화면 상태를 비웁니다. 브라우저의 세션 복원 설정에 따라 창을 다시 열어도 쿠키가 복원될 수 있으므로 공용 PC에서는 로그아웃을 사용합니다. 세션 만료 시 업무 화면을 닫고 로그인 화면으로 돌아갑니다.
 

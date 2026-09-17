@@ -28,13 +28,13 @@ async function freePort() {
 }
 
 async function fakeSupabase() {
-  const state = { calls: [], accounts: new Map(), tokens: new Map(), refreshTokens: new Map(), ready: true, confirmEmail: false };
+  const state = { calls: [], accounts: new Map(), tokens: new Map(), refreshTokens: new Map(), ready: true, confirmEmail: false, seatConflict: false };
   const addAccount = (username) => {
     const id = randomUUID();
     const email = `${username}@members.dhteams.invalid`;
     const timestamp = new Date().toISOString();
     const user = { id, aud: "authenticated", role: "authenticated", email, email_confirmed_at: timestamp, confirmed_at: timestamp, created_at: timestamp, updated_at: timestamp, app_metadata: { provider: "email", providers: ["email"] }, user_metadata: { username }, identities: [{ id, user_id: id, identity_id: randomUUID(), provider: "email", identity_data: { email, sub: id } }] };
-    const member = { id: randomUUID(), user_id: id, username, name: username, role: "", avatar: "🧑‍💻", color: "#547867", profile_completed: false, created_at: timestamp };
+    const member = { id: randomUUID(), user_id: id, username, name: username, role: "", avatar: "🧑‍💻", color: "#547867", status_message: "", profile_completed: false, created_at: timestamp };
     const account = { user, member, password };
     state.accounts.set(email, account);
     return account;
@@ -64,6 +64,11 @@ async function fakeSupabase() {
       };
       if (url.pathname === "/auth/v1/settings") return send(200, { external: { email: true, phone: false }, disable_signup: false, mailer_autoconfirm: !state.confirmEmail, phone_autoconfirm: false, sms_provider: "" });
       if (url.pathname === "/rest/v1/rpc/account_registration_ready") return state.ready ? send(200, true) : send(404, { code: "PGRST202", message: "Function not found" });
+      if (url.pathname === "/rest/v1/rpc/claim_office_seat") {
+        if (!account) return send(401, { message: "Missing authenticated user token" });
+        if (state.seatConflict) return send(409, { code: "23505", message: "다른 팀원이 이미 선택한 자리입니다." });
+        return send(200, { id: body.p_layout_id, name: "1번 사무실", theme: "sage", items: [{ id: "own-desk", kind: "desk", x: 250, y: 200, rotation: 0, label: "", member_id: body.p_item_id ? account.member.id : null }], updated_at: new Date().toISOString() });
+      }
       if (url.pathname === "/auth/v1/signup") {
         if (state.accounts.has(body.email)) return send(422, { code: "user_already_exists", msg: "User already registered" });
         const created = addAccount(body.data.username);
@@ -102,6 +107,10 @@ async function fakeSupabase() {
       if (url.pathname === "/rest/v1/projects") {
         if (!account) return send(401, { message: "Missing authenticated user token" });
         return send(200, [{ id: "shared-project", name: "공유 과업" }]);
+      }
+      if (url.pathname === "/rest/v1/team_presence") {
+        if (!account) return send(401, { message: "Missing authenticated user token" });
+        return send(200, [{ member_id: account.member.id, room_key: "office-1", x: 100, y: 200 }]);
       }
       return send(404, { message: `Unexpected test upstream: ${request.method} ${url.pathname}` });
     } catch (error) {
@@ -204,6 +213,9 @@ function client(baseURL) {
     assert.equal(initial.data.configured, true);
     assert.equal(initial.data.authenticated, false);
     assert.equal((await browser.request("/api/db/rest/v1/projects?select=*")).status, 401);
+    assert.equal((await browser.request("/api/db/rest/v1/team_presence?select=*")).status, 401);
+    assert.equal((await browser.request("/api/account/status", { method: "PATCH", body: { statusMessage: "로그인 전" } })).status, 401);
+    assert.equal((await browser.request("/api/office/seat", { method: "POST", body: { layoutId: randomUUID(), itemId: "own-desk" } })).status, 401);
     const legacy = createHmac("sha256", sessionSecret).update("teams-session-v1").digest("hex");
     assert.equal((await browser.request("/api/session", { cookie: `teams_sid=${legacy}` })).data.authenticated, false);
     assert.equal((await browser.request("/api/db/rest/v1/projects", { cookie: `teams_sid=${legacy}` })).status, 401);
@@ -239,6 +251,36 @@ function client(baseURL) {
     assert.ok(profileWrite.search.includes(`user_id=eq.${alice.user.id}`));
     assert.deepEqual(Object.keys(profileWrite.body).sort(), ["avatar", "color", "name", "profile_completed", "role"]);
 
+    const changedStatus = await browser.request("/api/account/status", { method: "PATCH", body: { statusMessage: "  집중 작업 중 · 3시에 답할게요  ", user_id: bob.user.id, id: bob.member.id, name: "다른 사람" } });
+    assert.equal(changedStatus.status, 200, JSON.stringify(changedStatus.data));
+    assert.equal(changedStatus.data.member.status_message, "집중 작업 중 · 3시에 답할게요");
+    assert.equal(changedStatus.data.member.id, alice.member.id);
+    assert.equal(bob.member.status_message, "");
+    const statusWrite = upstream.state.calls.findLast((call) => call.path === "/rest/v1/team_members" && call.method === "PATCH");
+    assert.ok(statusWrite.search.includes(`user_id=eq.${alice.user.id}`));
+    assert.deepEqual(Object.keys(statusWrite.body), ["status_message"]);
+    assert.equal((await browser.request("/api/session")).data.account.member.status_message, "집중 작업 중 · 3시에 답할게요");
+    const limitStatus = await browser.request("/api/account/status", { method: "PATCH", body: { statusMessage: "가".repeat(61) } });
+    assert.equal(limitStatus.status, 400);
+    assert.equal(alice.member.status_message, "집중 작업 중 · 3시에 답할게요");
+    assert.equal((await browser.request("/api/account/status", { method: "PATCH", body: { statusMessage: "😀".repeat(60) } })).status, 200);
+    assert.equal((await browser.request("/api/account/status", { method: "PATCH", origin: "https://untrusted.example", body: { statusMessage: "변조" } })).status, 403);
+    assert.equal((await browser.request("/api/account/status", { method: "PATCH", body: { statusMessage: "   " } })).data.member.status_message, "");
+
+    const seatBody = { layoutId: randomUUID(), itemId: "own-desk", memberId: bob.member.id };
+    assert.equal((await browser.request("/api/office/seat", { method: "POST", origin: "https://untrusted.example", body: seatBody })).status, 403);
+    assert.equal((await browser.request("/api/office/seat", { method: "POST", body: { ...seatBody, layoutId: "invalid" } })).status, 400);
+    const claimedSeat = await browser.request("/api/office/seat", { method: "POST", body: seatBody });
+    assert.equal(claimedSeat.status, 200, JSON.stringify(claimedSeat.data));
+    assert.equal(claimedSeat.data.layout.items[0].member_id, alice.member.id);
+    const seatCall = upstream.state.calls.findLast((call) => call.path === "/rest/v1/rpc/claim_office_seat");
+    assert.deepEqual(seatCall.body, { p_layout_id: seatBody.layoutId, p_item_id: "own-desk" });
+    assert.equal(upstream.state.tokens.get(seatCall.headers.authorization.replace(/^Bearer /, "")).user.id, alice.user.id);
+    upstream.state.seatConflict = true;
+    assert.equal((await browser.request("/api/office/seat", { method: "POST", body: seatBody })).status, 409);
+    upstream.state.seatConflict = false;
+    assert.equal((await browser.request("/api/office/seat", { method: "POST", body: { ...seatBody, itemId: null } })).data.layout.items[0].member_id, null);
+
     const proxy = await browser.request("/api/db/rest/v1/projects?select=*", { headers: { Authorization: "Bearer spoofed-user-token", apikey: "spoofed-key" } });
     assert.equal(proxy.status, 200);
     assert.equal(proxy.data[0].name, "공유 과업");
@@ -247,6 +289,11 @@ function client(baseURL) {
     assert.equal(upstream.state.tokens.get(userToken).user.id, alice.user.id);
     assert.notEqual(proxyCall.headers.authorization, `Bearer ${proxyCall.headers.apikey}`);
     assert.equal(proxyCall.headers.apikey, "sb_publishable_local_integration_only");
+    const presence = await browser.request("/api/db/rest/v1/team_presence?select=*", { headers: { Authorization: "Bearer spoofed-user-token" } });
+    assert.equal(presence.status, 200);
+    assert.equal(presence.data[0].member_id, alice.member.id);
+    const presenceCall = upstream.state.calls.findLast((call) => call.path === "/rest/v1/team_presence");
+    assert.equal(upstream.state.tokens.get(presenceCall.headers.authorization.replace(/^Bearer /, "")).user.id, alice.user.id);
     const beforeUnknown = upstream.state.calls.length;
     const unknown = await browser.request("/api/db/auth/v1/admin/users");
     assert.ok([403, 404].includes(unknown.status));
@@ -282,6 +329,8 @@ function client(baseURL) {
     assert.ok(logout.setCookies.some((cookie) => /max-age=0(?:;|$)/i.test(cookie)));
     assert.equal((await browser.request("/api/session")).data.authenticated, false);
     assert.equal((await browser.request("/api/db/rest/v1/projects")).status, 401);
+
+    assert.equal((await browser.request("/api/db/rest/v1/team_presence")).status, 401);
 
     const registration = { username: "  NEW_MEMBER  ", password, passwordConfirm: password };
     upstream.state.ready = false;

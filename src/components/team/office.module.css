@@ -251,8 +251,11 @@
 .canvasScroll {
   width: 100%;
   max-width: 100%;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+  overflow: auto;
+  height: clamp(440px, 61vh, 680px);
+  overscroll-behavior: contain;
+  border-radius: 12px;
+  outline-offset: -3px;
   scrollbar-width: thin;
   scrollbar-color: #c9d5c2 transparent;
   padding-bottom: 5px;
@@ -261,9 +264,10 @@
 .canvas {
   display: block;
   width: 100%;
-  min-width: 640px;
+  min-width: 0;
+  max-width: none;
   height: auto;
-  overflow: visible;
+  overflow: hidden;
   font-family: inherit;
   user-select: none;
   -webkit-user-select: none;
@@ -300,6 +304,7 @@
 
 .person {
   animation: arrive .35s ease-out;
+  transform-box: fill-box;
   transform-origin: center 30px;
 }
 
@@ -1097,3 +1102,57 @@
     transition: none;
   }
 }
+
+/* Walkable world: the room scrolls inside its own viewport. */
+.roomNav { display:flex; gap:8px; overflow:auto; padding:12px 20px; border-bottom:1px solid #e3eadf; background:#fbfcf7; scrollbar-width:thin; }
+.roomNav button { display:flex; align-items:center; gap:7px; flex-shrink:0; border:1px solid #e1e7d9; border-radius:20px; padding:8px 13px; font-size:12px; color:#71816b; background:white; cursor:pointer; }
+.roomNav button[aria-current] { background:#365f50; border-color:#365f50; color:#fffaf0; box-shadow:0 3px 8px #31584420; }
+.roomNav button:hover { border-color:#8bad93; }
+.cameraTools { display:flex; align-items:center; gap:5px; flex-wrap:wrap; margin-bottom:10px; justify-content:flex-end; font-size:11px; color:#62795d; }
+.cameraTools button { border:1px solid #cfdbc5; border-radius:7px; padding:5px 9px; background:#fffff2d9; cursor:pointer; }
+.cameraTools span { min-width:36px; text-align:center; font-variant-numeric:tabular-nums; }
+.canvasScroll:focus-visible { outline:3px solid #78a78f; }
+.portal { cursor:pointer; outline:none; }
+.portal:focus-visible > ellipse, .portal:hover > ellipse { stroke:#276e55; stroke-width:4; fill:#dcefa170; }
+.gameControls { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:16px 20px; background:#f9fbf5; border-top:1px solid #e3eadf; }
+.gameControls strong { color:#43624f; font-size:13px; }
+.gameControls p { font-size:11px; color:#89957d; margin-top:4px; }
+.gameActions { display:flex; gap:8px; }
+.directionPad { display:grid; flex-shrink:0; grid-template-columns:repeat(3,34px); grid-template-rows:repeat(2,31px); gap:3px; }
+.directionPad button { display:flex; align-items:center; justify-content:center; border:1px solid #cad7c0; background:#fffef5; color:#57795f; border-radius:8px; touch-action:none; user-select:none; cursor:pointer; box-shadow:0 2px 0 #c5d0ba; }
+.directionPad button:first-child { grid-column:2; }
+.directionPad button:nth-child(2) { grid-column:1; grid-row:2; }
+.directionPad button:nth-child(3) { grid-column:2; grid-row:2; }
+.directionPad button:nth-child(4) { grid-column:3; grid-row:2; }
+.directionPad button:active { background:#d9e6ce; box-shadow:none; transform:translateY(2px); }
+.seatActions { display:flex; flex-direction:column; gap:8px; }
+.leftLeg, .rightLeg { transform-box:fill-box; transform-origin:center; }
+.walking .leftLeg { animation:walkStep .32s infinite alternate ease-in-out; }
+.walking .rightLeg { animation:walkStep .32s infinite alternate-reverse ease-in-out; }
+@keyframes walkStep { from { transform:translateY(-3px); } to { transform:translateY(3px); } }
+@media (max-width:1799px) and (min-width:1001px) {
+ .workspace { grid-template-columns:minmax(0,1fr); }
+ .sidebar { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border-left:0; border-top:1px solid #e4eadf; align-items:start; }
+ .sidebarEyebrow { display:none; }
+ .todayTitle { grid-column:1/-1; }
+}
+@media (max-width:1000px) { .canvas { min-width:0; } }
+@media (max-width:600px) {
+ .scene { padding:35px 8px 8px; }
+ .sceneNote { left:12px; }
+ .canvas { min-width:0; }
+ .canvasScroll { height:490px; }
+ .cameraTools { justify-content:flex-start; }
+ .gameControls { flex-wrap:wrap; padding:12px; gap:10px; }
+ .gameControls > div:first-child { flex:1; min-width:180px; }
+ .gameControls p { line-height:1.6; }
+ .roomNav { padding:10px; }
+ .roomNav button { font-size:11px; }
+ .sidebar { display:flex; flex-direction:column; align-items:stretch; gap:16px; }
+ .sidebarEyebrow { display:none; }
+ .todayTitle { margin-top:0; }
+ .sidebar > * { min-width:0; }
+ .inspector { border-left:0; border-top:1px solid #ecf0e5; padding-left:0; padding-top:16px; }
+ .selectHint { align-self:stretch; }
+}
+@media (prefers-reduced-motion:reduce) { .walking .leftLeg, .walking .rightLeg { animation:none; } }

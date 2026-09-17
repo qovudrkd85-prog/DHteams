@@ -4,9 +4,9 @@
 
 ## 사용할 수 있는 기능
 
-- **우리 사무실**: 사람 캐릭터, 책상·모니터·의자, 회의 테이블·화분·소파·보드. 가구 이동·회전·좌석 배정, 여러 배치도와 테마 저장.
+- **우리 사무실**: 방향키로 캐릭터를 움직이며 사무실 4개·야외 마당·카페를 오갑니다. 본인 책상을 선택하고 앉거나 일어서며, 가구와 공간 크기를 꾸밉니다.
 - **회원가입과 내 설정**: 아이디·비밀번호로 가입/로그인하고 본인의 이름·직책·캐릭터·색상을 설정합니다. 비밀번호 변경과 로그아웃을 지원합니다.
-- **팀원과 출퇴근**: 로그인한 본인의 한국 날짜 기준 출근·퇴근을 기록합니다. 출근한 자리에는 캐릭터가 앉습니다.
+- **팀원과 출퇴근**: 로그인한 본인의 한국 날짜 기준 출근·퇴근과 상태 메시지를 기록하고 팀원의 위치를 공유합니다.
 - **공유 달력**: 업무/회의/회식/휴가/외근·출장/기타. 등록자 이름·색상, 내 일정·팀원별 필터, 공동 수정, 삭제 취소.
 - **과업 관리**: 과업 검색, 폴더·파일 트리, 수신·수정·발송·확인 이력, DIDAS 체크, 과업별 업무 달력, 월 메모, 휴지통.
 
@@ -25,7 +25,9 @@ npm run dev
 
 ## 데이터베이스 업데이트
 
-**기존 설치는 [schema-team-workspace.sql](supabase/schema-team-workspace.sql) → [schema-accounts.sql](supabase/schema-accounts.sql) 순서로 적용하고 Supabase Auth의 Confirm Email을 꺼야 합니다.** 부서 일정 테이블이 없다면 [schema-department-events.sql](supabase/schema-department-events.sql)을 먼저 실행하세요. 계정 SQL은 마지막에 적용합니다.
+**개인 계정이 이미 설치된 운영 DB에는 `npm run db:prepare`로 생성한 `artifacts/setup/teams-office-world-upgrade.sql` 전체를 Supabase SQL Editor에서 수동 적용한 후 새 앱을 배포합니다.** 파일 생성은 DB를 변경하지 않습니다. [공간 사용법과 업데이트 안내](docs/OFFICE_WORLD.md)를 참고하세요.
+
+이전 공유 모드 설치는 `artifacts/setup/teams-account-upgrade.sql`을 적용합니다. 원본 순서는 [팀 공간](supabase/schema-team-workspace.sql) → [계정](supabase/schema-accounts.sql) → [사무실 월드](supabase/schema-office-presence.sql)이며, **사무실 월드 SQL이 마지막**입니다. 부서 일정 테이블이 없다면 [부서 일정 SQL](supabase/schema-department-events.sql)을 먼저 실행하고 Supabase Auth의 Confirm Email을 끕니다.
 
 마이그레이션은 기존 과업·일정을 유지합니다. 이전 일정은 '등록자 미지정'으로 표시됩니다. 이전에 이름만 등록했던 프로필은 보존하며 동명이인 계정과 자동 연결하지 않습니다. 가입 준비가 안 된 서버에서는 원인을 안내하고 가입을 진행하지 않습니다.
 

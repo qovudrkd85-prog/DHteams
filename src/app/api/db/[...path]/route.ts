@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { AccountError, accountFailure, createAuthContext, jsonError, requireSameOrigin } from "@/lib/server-auth";
 
-const TABLES = new Set(["projects", "nodes", "file_logs", "schedules", "project_memos", "office_layouts", "department_events", "team_members", "team_attendance", "project_members"]);
+const TABLES = new Set(["projects", "nodes", "file_logs", "schedules", "project_memos", "office_layouts", "department_events", "team_members", "team_attendance", "team_presence", "project_members"]);
 const REQUEST_HEADERS = ["content-type", "accept", "prefer", "range", "range-unit", "if-match", "if-none-match"];
 const RESPONSE_HEADERS = ["content-type", "content-range", "range-unit", "preference-applied", "etag"];
 
