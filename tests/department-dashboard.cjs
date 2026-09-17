@@ -6,6 +6,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { installAccountMock } = require("./helpers/account-mock.cjs");
 const baseURL = process.env.TEST_BASE_URL || "http://localhost:3001";
 if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
   throw new Error("Only a local test server is allowed.");
@@ -23,6 +24,10 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     const today = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Seoul",
     }).format(new Date());
+    const members = [
+      { id: "11111111-1111-4111-8111-111111111111", name: "김민수", role: "설계", avatar: "🐻", color: "#547867", created_at: today },
+      { id: "22222222-2222-4222-8222-222222222222", name: "이지은", role: "기획", avatar: "🐱", color: "#5B7FA6", created_at: today },
+    ];
     let revision = 0;
     const stamp = () =>
       `2026-01-01T00:00:${String(++revision).padStart(2, "0")}.000Z`;
@@ -66,15 +71,16 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     ];
     let missing = false,
       failSave = false,
+      oldSchema = false,
       writes = 0;
-    await page.route("**/api/session", (route) =>
-      route.fulfill({ json: { secureMode: true, authenticated: true } }),
-    );
+    const accountState = await installAccountMock(context, { members });
     await page.route("**/rest/v1/**", async (route) => {
       const req = route.request();
       const url = new URL(req.url());
       if (url.pathname.endsWith("/projects"))
         return route.fulfill({ json: projects });
+      if (url.pathname.endsWith("/team_members"))
+        return route.fulfill({ json: members });
       if (!url.pathname.endsWith("/department_events"))
         return route.fulfill({ json: [] });
       if (missing)
@@ -97,6 +103,11 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
           status: 503,
           json: { message: "테스트 연결 실패" },
         });
+      if (oldSchema)
+        return route.fulfill({
+          status: 400,
+          json: { code: "PGRST204", message: "created_by column missing" },
+        });
       const body = req.postDataJSON();
       if (req.method() === "POST") {
         const row = {
@@ -113,6 +124,9 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
           r.id === url.searchParams.get("id")?.slice(3) &&
           r.updated_at === url.searchParams.get("updated_at")?.slice(3),
       );
+      for (const key of ["created_by", "creator_name", "creator_color"]) {
+        assert.equal(Object.hasOwn(body, key), false, "Shared edits must not send creator fields.");
+      }
       if (!row) return route.fulfill({ json: null });
       Object.assign(row, body, { updated_at: stamp() });
       return route.fulfill({ json: row });
@@ -132,8 +146,10 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
       "/projects/p3",
     );
     await page.getByLabel("과업 검색").fill("");
+    // The signed-in account becomes the author; legacy events remain readable.
     await page.getByRole("button", { name: "일정 등록", exact: true }).click();
     const dialog = page.getByRole("dialog");
+    assert.equal(await dialog.getByLabel("유형", { exact: true }).inputValue(), "work");
     await dialog.getByLabel("일정명", { exact: true }).fill("금요일 부서 회식");
     await dialog.getByLabel("유형", { exact: true }).selectOption("dinner");
     await dialog.getByLabel("장소", { exact: true }).fill("부서 식당");
@@ -141,33 +157,50 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await dialog.getByRole("button", { name: "저장", exact: true }).click();
     await dialog.waitFor({ state: "hidden" });
     assert.equal(rows.length, 2);
+    assert.equal(rows[1].created_by, members[0].id);
+    assert.equal(rows[1].creator_name, members[0].name);
+    assert.equal(rows[1].creator_color, members[0].color);
     await page.getByRole("button", { name: "회식", exact: true }).click();
     assert.equal(
-      await page.locator('button[title="회의 · 부서 주간회의"]').count(),
+      await page.locator('button[title^="회의 · 부서 주간회의 ·"]').count(),
       0,
     );
     await page.getByRole("button", { name: "전체", exact: true }).click();
-    await page.locator('button[title="회식 · 금요일 부서 회식"]').click();
+    // Another authenticated account can edit content without taking over authorship.
+    accountState.useMember(1);
+    await page.reload();
+    await page.locator('button[title^="회식 · 금요일 부서 회식 ·"]').click();
+    await dialog.getByText("등록자 김민수", { exact: true }).waitFor();
     await dialog
       .getByLabel("일정명", { exact: true })
       .fill("부서 회식 장소 변경");
     await dialog.getByRole("button", { name: "저장", exact: true }).click();
     await dialog.waitFor({ state: "hidden" });
     assert.equal(rows[1].title, "부서 회식 장소 변경");
+    assert.equal(rows[1].created_by, members[0].id);
+    assert.equal(rows[1].creator_name, members[0].name);
+    assert.equal(rows[1].creator_color, members[0].color);
     await page.reload();
-    await page.locator('button[title="회식 · 부서 회식 장소 변경"]').waitFor();
-    await page.locator('button[title="회식 · 부서 회식 장소 변경"]').click();
+    await page.locator('button[title^="회식 · 부서 회식 장소 변경 ·"]').waitFor();
+    await page.locator('button[title^="회식 · 부서 회식 장소 변경 ·"]').click();
     await dialog.getByRole("button", { name: "삭제", exact: true }).click();
     await dialog
       .getByRole("button", { name: "삭제 확인", exact: true })
       .click();
     await dialog.waitFor({ state: "hidden" });
     assert.ok(rows[1].deleted_at);
+    // Undo must refresh the displayed month, even after navigating away.
+    await page.getByRole("button", { name: "다음 달", exact: true }).click();
+    await page.getByText("일정을 불러오고 있습니다.", { exact: true }).waitFor({ state: "hidden" });
     await page.getByRole("button", { name: "되돌리기", exact: true }).click();
-    await page.locator('button[title="회식 · 부서 회식 장소 변경"]').waitFor();
+    await page.getByText("일정을 복원했습니다.", { exact: true }).waitFor();
+    await page.getByText("일정을 불러오고 있습니다.", { exact: true }).waitFor({ state: "hidden", timeout: 5000 });
+    assert.equal(await page.getByRole("button", { name: "일정 등록", exact: true }).isEnabled(), true);
+    await page.getByRole("button", { name: "이전 달", exact: true }).click();
+    await page.locator('button[title^="회식 · 부서 회식 장소 변경 ·"]').waitFor();
     assert.equal(rows[1].deleted_at, null);
     // Conflict: another member edits while this editor is open.
-    await page.locator('button[title="회식 · 부서 회식 장소 변경"]').click();
+    await page.locator('button[title^="회식 · 부서 회식 장소 변경 ·"]').click();
     rows[1].updated_at = stamp();
     await dialog
       .getByLabel("일정명", { exact: true })
@@ -189,7 +222,46 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
       "실패 시 보존",
     );
     failSave = false;
+    oldSchema = true;
+    await dialog.getByRole("button", { name: "저장", exact: true }).click();
+    await page.getByText("업무 일정과 등록자 표시를 위한 업데이트가 필요합니다.", { exact: false }).waitFor();
+    assert.equal(await dialog.getByLabel("일정명", { exact: true }).inputValue(), "실패 시 보존");
+    oldSchema = false;
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    // Authored work schedules distinguish their creator from their organizer.
+    await page.getByRole("button", { name: "일정 등록", exact: true }).click();
+    await dialog.getByLabel("일정명", { exact: true }).fill("제안서 초안 작성");
+    assert.equal(await dialog.getByLabel("유형", { exact: true }).inputValue(), "work");
+    await dialog.getByLabel("담당자·참석자", { exact: true }).fill("김민수");
+    await dialog.getByRole("button", { name: "저장", exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+    const work = rows.find((row) => row.title === "제안서 초안 작성");
+    assert.equal(work.created_by, members[1].id);
+    assert.equal(work.creator_name, "이지은");
+    assert.equal(work.organizer, "김민수");
+    const workButton = page.locator('button[title^="업무 · 제안서 초안 작성 ·"]');
+    await workButton.waitFor();
+    await page.getByLabel("등록자", { exact: true }).selectOption("mine");
+    await workButton.waitFor();
+    assert.equal(await page.locator('button[title^="회식 ·"]').count(), 0);
+    await page.getByRole("button", { name: "업무", exact: true }).click();
+    await workButton.waitFor();
+    await page.getByLabel("등록자", { exact: true }).selectOption(members[0].id);
+    assert.equal(await workButton.count(), 0);
+    await page.getByText("선택한 유형·등록자의 일정이 없어요.", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "전체", exact: true }).click();
+    await page.locator('button[title^="회식 · 부서 회식 장소 변경 ·"]').waitFor();
+    await page.getByLabel("등록자", { exact: true }).selectOption("unassigned");
+    await page.locator('button[title^="회의 · 부서 주간회의 ·"]').waitFor();
+    assert.equal(await workButton.count(), 0);
+    // Editing an older row must leave its unassigned author intact.
+    await page.locator('button[title^="회의 · 부서 주간회의 ·"]').click();
+    await dialog.getByText("등록자 미지정", { exact: true }).waitFor();
+    await dialog.getByLabel("메모", { exact: true }).fill("기존 일정도 함께 수정할 수 있어요.");
+    await dialog.getByRole("button", { name: "저장", exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+    assert.equal(rows[0].created_by, undefined);
+    await page.getByRole("button", { name: "필터 초기화", exact: true }).click();
     // Multi-day leave crosses the month/year boundary.
     await page.getByRole("button", { name: "일정 등록", exact: true }).click();
     await dialog.getByLabel("일정명", { exact: true }).fill("연말 휴가");
@@ -212,11 +284,12 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
       .getByRole("button", { name: "휴가 연말 휴가", exact: false })
       .waitFor();
     await page.getByRole("button", { name: "오늘", exact: true }).click();
-    await page.locator('button[title="회의 · 부서 주간회의"]').waitFor();
+    await page.locator('button[title^="회의 · 부서 주간회의 ·"]').waitFor();
     fs.mkdirSync(path.resolve("artifacts"), { recursive: true });
     await page.waitForFunction(
       () => document.querySelectorAll("[data-sonner-toast]").length === 0,
     );
+    await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({
       path: "artifacts/dashboard-desktop.png",
       fullPage: true,
@@ -232,6 +305,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
       ),
       false,
     );
+    await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({
       path: "artifacts/dashboard-mobile.png",
       fullPage: true,
@@ -260,7 +334,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.equal(await page.locator("aside a").count(), 3);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: search/navigation links, create/edit/reload/delete/undo, concurrency conflict, save failure, year boundary, mobile overflow, missing table. Mock writes:",
+      "PASS: search/navigation links, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
       writes,
     );
   } finally {

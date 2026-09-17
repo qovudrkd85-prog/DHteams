@@ -81,6 +81,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   );
   const [projectDeleteOpen, setProjectDeleteOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [scheduleRevision, setScheduleRevision] = useState(0);
   const router = useRouter();
 
   const tree = useMemo(() => buildTree(nodes), [nodes]);
@@ -196,11 +197,13 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   }
 
   async function patchLog(id: string, patch: Partial<LogInput>) {
-    setLogs((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
     try {
-      await api.updateLog(id, patch);
+      const saved = await api.updateLog(id, patch);
+      setLogs((prev) => prev.map((log) => (log.id === id ? saved : log)));
+      return true;
     } catch (error) {
       toast.error(errorMessage(error, "저장하지 못했습니다."));
+      return false;
     }
   }
 
@@ -343,7 +346,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
         {/* 우: 업무일정 달력 또는 선택한 파일의 이력 */}
         <section className="flex min-w-0 flex-1 flex-col gap-3">
           {selectedId === SCHEDULE_ID ? (
-            <ScheduleCalendar projectId={projectId} />
+            <ScheduleCalendar projectId={projectId} refreshKey={scheduleRevision} />
           ) : selectedNode && selectedNode.kind === "file" ? (
             <>
               <div className="flex items-center justify-between">
@@ -438,6 +441,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
         open={trashOpen}
         onOpenChange={setTrashOpen}
         onRestored={async () => {
+          setScheduleRevision((revision) => revision + 1);
           setNodes(await api.listNodes(projectId));
         }}
       />

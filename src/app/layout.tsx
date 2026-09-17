@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-import { PasswordGate } from "@/components/password-gate";
+import { AccountProvider } from "@/components/account/provider";
 import { Toaster } from "@/components/ui/sonner";
 
 const geistSans = Geist({
@@ -27,7 +27,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-muted/30">
-        <PasswordGate>{children}</PasswordGate>
+        <AccountProvider>{children}</AccountProvider>
         <Toaster position="top-center" richColors />
       </body>
     </html>

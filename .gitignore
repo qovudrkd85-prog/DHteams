@@ -45,3 +45,6 @@ next-env.d.ts
 
 # Local browser verification screenshots
 /artifacts/
+
+# Supabase CLI cache (generated during deployment checks)
+/supabase/.temp/

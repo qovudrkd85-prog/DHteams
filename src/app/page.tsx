@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ArrowUpRight, FolderOpen, Search, CalendarDays } from "lucide-react";
+import { ArrowUpRight, FolderOpen, Search, Sprout } from "lucide-react";
 
 import { AppHeader } from "@/components/app-header";
 import { DepartmentCalendar } from "@/components/department-calendar";
+import { TeamOffice } from "@/components/team/office";
+import { TeamPanel } from "@/components/team/panel";
 import { TrashDialog } from "@/components/trash-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,9 +27,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { createProject, listProjects } from "@/lib/queries";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import type { Project } from "@/lib/types";
+import { useTeamWorkspace } from "@/lib/team/use-team-workspace";
 
 export default function HomePage() {
   const router = useRouter();
+  const workspace = useTeamWorkspace();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -94,17 +98,17 @@ export default function HomePage() {
       <AppHeader>
         <span className="text-xs text-slate-500">우리 부서의 업무 공간</span>
       </AppHeader>
-      <main className="mx-auto w-full max-w-[1440px] flex-1 px-3 py-6 sm:px-6 lg:px-10 lg:py-8">
+      <main className="mx-auto w-full max-w-[1600px] flex-1 px-3 py-6 sm:px-6 lg:px-10 lg:py-8">
         <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-teal-700">
-              <CalendarDays className="size-3.5" /> TEAM WORKSPACE
+              <Sprout className="size-3.5" /> OUR LITTLE WORKSPACE
             </p>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
               함께 계획하는 하루
             </h1>
             <p className="mt-2 text-sm text-slate-500">
-              부서 일정을 한눈에 살펴보고, 오늘의 과업을 이어가세요.
+              내 자리에 앉아 하루를 시작하고, 우리 팀의 계획을 함께 채워요.
             </p>
           </div>
 
@@ -178,11 +182,25 @@ export default function HomePage() {
         </div>
 
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_350px]">
-          <DepartmentCalendar />
+          <div className="min-w-0 space-y-5">
+            <TeamOffice
+              members={workspace.members}
+              attendance={workspace.attendance}
+              currentMember={workspace.currentMember}
+              loading={workspace.loading || !!workspace.error}
+              onRegister={() => workspace.setProfileOpen(true)}
+            />
+            <DepartmentCalendar
+              members={workspace.members}
+              currentMember={workspace.error ? null : workspace.currentMember}
+              onRegister={() => workspace.setProfileOpen(true)}
+            />
+          </div>
           <aside
             className="min-w-0 space-y-4 lg:sticky lg:top-20"
             aria-label="과업 목록"
           >
+            <TeamPanel workspace={workspace} />
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-100 p-5">
                 <div className="mb-1 flex items-center gap-2">
@@ -274,7 +292,7 @@ export default function HomePage() {
                 일정은 함께, 기록은 차곡차곡.
               </p>
               <p className="mt-2 text-xs leading-6 text-teal-100">
-                회식·회의·휴가는 부서 달력에,
+                업무·회의·휴가는 등록자와 함께 부서 달력에,
                 <br />
                 과업별 일정과 파일 이력은 각 과업 안에 남겨 주세요.
               </p>

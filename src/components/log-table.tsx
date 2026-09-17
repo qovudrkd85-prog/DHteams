@@ -1,7 +1,7 @@
 "use client";
 
 import { Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -20,7 +20,7 @@ import { LOG_ACTIONS, type FileLog, type LogAction } from "@/lib/types";
 
 interface LogTableProps {
   logs: FileLog[];
-  onPatch: (id: string, patch: Partial<LogInput>) => void;
+  onPatch: (id: string, patch: Partial<LogInput>) => Promise<boolean>;
   onDelete: (log: FileLog) => void;
 }
 
@@ -62,7 +62,7 @@ export function LogTable({ logs, onPatch, onDelete }: LogTableProps) {
 interface LogRowProps {
   seq: number;
   log: FileLog;
-  onPatch: (id: string, patch: Partial<LogInput>) => void;
+  onPatch: (id: string, patch: Partial<LogInput>) => Promise<boolean>;
   onDelete: (log: FileLog) => void;
 }
 
@@ -73,11 +73,40 @@ function LogRow({ seq, log, onPatch, onDelete }: LogRowProps) {
     subject: log.subject ?? "",
     detail: log.detail ?? "",
   });
+  type Field = keyof typeof draft;
+  const [failedFields, setFailedFields] = useState<Field[]>([]);
+  const [busy, setBusy] = useState(false);
+  const saving = useRef(false);
 
-  function commit(field: keyof typeof draft, original: string | null) {
+  async function save(patch: Partial<LogInput>, fields: Field[] = []) {
+    if (saving.current) return;
+    saving.current = true;
+    setBusy(true);
+    try {
+      const saved = await onPatch(log.id, patch);
+      setFailedFields((previous) => saved
+        ? previous.filter((field) => !fields.includes(field))
+        : [...new Set([...previous, ...fields])]);
+    } finally {
+      saving.current = false;
+      setBusy(false);
+    }
+  }
+
+  function commit(field: Field, original: string | null) {
     const value = draft[field];
-    if (value === (original ?? "")) return;
-    onPatch(log.id, { [field]: value || null } as Partial<LogInput>);
+    if (value === (original ?? "")) {
+      setFailedFields((previous) => previous.filter((entry) => entry !== field));
+      return;
+    }
+    void save({ [field]: field === "actor" ? value : value || null }, [field]);
+  }
+
+  function retry() {
+    const fields = (Object.keys(draft) as Field[]).filter((field) => draft[field] !== (log[field] ?? ""));
+    if (!fields.length) { setFailedFields([]); return; }
+    const patch = Object.fromEntries(fields.map((field) => [field, field === "actor" ? draft[field] : draft[field] || null]));
+    void save(patch, fields);
   }
 
   return (
@@ -89,7 +118,8 @@ function LogRow({ seq, log, onPatch, onDelete }: LogRowProps) {
       <TableCell>
         <Select
           value={log.action}
-          onValueChange={(value) => onPatch(log.id, { action: value as LogAction })}
+          disabled={busy}
+          onValueChange={(value) => { if (value) void save({ action: value as LogAction }); }}
         >
           <SelectTrigger size="sm" className="w-full">
             <SelectValue />
@@ -109,7 +139,8 @@ function LogRow({ seq, log, onPatch, onDelete }: LogRowProps) {
           type="date"
           className="h-8"
           value={log.occurred_on}
-          onChange={(e) => onPatch(log.id, { occurred_on: e.target.value })}
+          disabled={busy}
+          onChange={(e) => { if (e.target.value) void save({ occurred_on: e.target.value }); }}
         />
       </TableCell>
 
@@ -118,6 +149,9 @@ function LogRow({ seq, log, onPatch, onDelete }: LogRowProps) {
           className="h-8"
           placeholder="담당자"
           value={draft.actor}
+          maxLength={100}
+          disabled={busy}
+          aria-invalid={failedFields.includes("actor")}
           onChange={(e) => setDraft({ ...draft, actor: e.target.value })}
           onBlur={() => commit("actor", log.actor)}
         />
@@ -128,6 +162,9 @@ function LogRow({ seq, log, onPatch, onDelete }: LogRowProps) {
           className="h-8"
           placeholder="○○과 / 발주처"
           value={draft.counterpart}
+          maxLength={100}
+          disabled={busy}
+          aria-invalid={failedFields.includes("counterpart")}
           onChange={(e) => setDraft({ ...draft, counterpart: e.target.value })}
           onBlur={() => commit("counterpart", log.counterpart)}
         />
@@ -138,6 +175,9 @@ function LogRow({ seq, log, onPatch, onDelete }: LogRowProps) {
           className="h-8"
           placeholder="자료명 / 버전"
           value={draft.subject}
+          maxLength={300}
+          disabled={busy}
+          aria-invalid={failedFields.includes("subject")}
           onChange={(e) => setDraft({ ...draft, subject: e.target.value })}
           onBlur={() => commit("subject", log.subject)}
         />
@@ -149,21 +189,29 @@ function LogRow({ seq, log, onPatch, onDelete }: LogRowProps) {
           rows={1}
           placeholder="수정 내용"
           value={draft.detail}
+          maxLength={4000}
+          disabled={busy}
+          aria-invalid={failedFields.includes("detail")}
           onChange={(e) => setDraft({ ...draft, detail: e.target.value })}
           onBlur={() => commit("detail", log.detail)}
         />
+        {failedFields.length > 0 && <div role="alert" className="mt-2 text-xs text-red-700">
+          입력한 내용이 아직 저장되지 않았습니다.
+          <Button type="button" size="sm" variant="outline" className="mt-1" disabled={busy} onClick={retry}>이력 다시 저장</Button>
+        </div>}
       </TableCell>
 
       <TableCell className="pt-3 text-center">
         <Checkbox
           checked={log.didas_uploaded ?? false}
-          onCheckedChange={(checked) => onPatch(log.id, { didas_uploaded: checked })}
+          disabled={busy}
+          onCheckedChange={(checked) => { void save({ didas_uploaded: checked }); }}
           aria-label="DIDAS 업로드 완료"
         />
       </TableCell>
 
       <TableCell>
-        <Button variant="ghost" size="icon" className="size-8" onClick={() => onDelete(log)}>
+        <Button variant="ghost" size="icon" className="size-8" disabled={busy} onClick={() => onDelete(log)}>
           <Trash2 className="size-4 text-muted-foreground" />
           <span className="sr-only">행 삭제</span>
         </Button>

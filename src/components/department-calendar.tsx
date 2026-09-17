@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import type { TeamMember } from "@/lib/team/workspace";
 import {
   dateKey,
   monthCells,
@@ -51,11 +52,49 @@ const message = (error: unknown) =>
     : "일정을 처리하지 못했습니다. 다시 시도해 주세요.";
 type Editor = { original?: DepartmentEvent; input: DepartmentEventInput };
 
-export function DepartmentCalendar() {
+function CreatorBadge({
+  name,
+  color,
+  compact = false,
+}: {
+  name?: string | null;
+  color?: string | null;
+  compact?: boolean;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex min-w-0 max-w-full items-center gap-1.5",
+        compact ? "text-[10px] opacity-80" : "text-xs text-slate-600",
+      )}
+      title={`등록자: ${name || "미지정"}`}
+    >
+      <span
+        aria-hidden="true"
+        className="size-2 shrink-0 rounded-full"
+        style={{ backgroundColor: color || "#94a3b8" }}
+      />
+      <span className="truncate">
+        {name ? `${compact ? "" : "등록자 "}${name}` : "등록자 미지정"}
+      </span>
+    </span>
+  );
+}
+
+export function DepartmentCalendar({
+  members = [],
+  currentMember = null,
+  onRegister,
+}: {
+  members?: TeamMember[];
+  currentMember?: TeamMember | null;
+  onRegister?: () => void;
+}) {
   const [month, setMonth] = useState(() => new Date());
   const [selected, setSelected] = useState(() => dateKey(new Date()));
   const [events, setEvents] = useState<DepartmentEvent[]>([]);
   const [filter, setFilter] = useState<EventCategory | "all">("all");
+  const [creatorFilter, setCreatorFilter] = useState("all");
   const [editor, setEditor] = useState<Editor | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -86,8 +125,10 @@ export function DepartmentCalendar() {
       if (version === requestVersion.current) setLoading(false);
     }
   }, [first, last]);
+  const reloadCurrentMonth = useRef(reload);
 
   useEffect(() => {
+    reloadCurrentMonth.current = reload;
     void reload();
     const refresh = () => {
       if (document.visibilityState === "visible") void reload();
@@ -102,8 +143,24 @@ export function DepartmentCalendar() {
   }, [reload, invalidate]);
 
   const currentEvents = loadedRange === range ? events : [];
+  const activeCreatorFilter =
+    creatorFilter === "mine" && !currentMember ? "all" : creatorFilter;
+  const creators = new Map(members.map((member) => [member.id, member.name]));
+  // Keep historical creators filterable even if they are not in the current roster.
+  for (const event of currentEvents) {
+    if (event.created_by && !creators.has(event.created_by)) {
+      creators.set(event.created_by, event.creator_name || "이전 팀원");
+    }
+  }
   const visible = currentEvents.filter(
-    (e) => filter === "all" || e.category === filter,
+    (e) =>
+      (filter === "all" || e.category === filter) &&
+      (activeCreatorFilter === "all" ||
+        (activeCreatorFilter === "mine"
+          ? e.created_by === currentMember?.id
+          : activeCreatorFilter === "unassigned"
+            ? !e.created_by
+            : e.created_by === activeCreatorFilter)),
   );
   const dayEvents = visible.filter((e) => occursOn(e, selected));
   const monthCount = currentEvents.filter(
@@ -114,11 +171,18 @@ export function DepartmentCalendar() {
   const isLoading = loading || (!error && loadedRange !== range);
 
   function create(day = selected) {
+    if (!currentMember) {
+      toast.info(
+        "내 팀원을 등록하거나 선택하면 내 이름으로 일정을 남길 수 있어요.",
+      );
+      onRegister?.();
+      return;
+    }
     setConfirmDelete(false);
     setEditor({
       input: {
         title: "",
-        category: filter === "all" ? "meeting" : filter,
+        category: filter === "all" ? "work" : filter,
         starts_on: day,
         ends_on: day,
         starts_at: null,
@@ -167,6 +231,10 @@ export function DepartmentCalendar() {
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!editor || busy || !editor.input.title.trim()) return;
+    if (!editor.original && !currentMember) {
+      toast.error("내 팀원을 등록하거나 선택한 뒤 일정을 저장해 주세요.");
+      return;
+    }
     if (editor.input.ends_on < editor.input.starts_on) {
       toast.error("종료일은 시작일보다 빠를 수 없습니다.");
       return;
@@ -184,6 +252,7 @@ export function DepartmentCalendar() {
           note: input.note?.trim() || null,
         },
         original,
+        currentMember,
       );
       setEvents((prev) => [...prev.filter((e) => e.id !== saved.id), saved]);
       setSelected(saved.starts_on);
@@ -215,7 +284,8 @@ export function DepartmentCalendar() {
           onClick: async () => {
             try {
               await setDepartmentEventDeleted(deleted, false);
-              await reload();
+              // The undo toast can stay open after the user changes months.
+              await reloadCurrentMonth.current();
               toast.success("일정을 복원했습니다.");
             } catch (err) {
               toast.error(message(err));
@@ -244,7 +314,7 @@ export function DepartmentCalendar() {
           <div>
             <h2 className="font-semibold text-slate-900">부서 공유 달력</h2>
             <p className="mt-1 text-xs text-slate-500">
-              회의부터 회식까지, 함께 보는 우리 일정
+              업무부터 회식까지, 누가 등록했는지 한눈에
             </p>
           </div>
         </div>
@@ -342,6 +412,65 @@ export function DepartmentCalendar() {
           </button>
         ))}
       </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 sm:px-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <Label htmlFor="event-creator-filter" className="text-xs text-slate-500">
+            등록자
+          </Label>
+          <select
+            id="event-creator-filter"
+            className="h-8 max-w-48 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700"
+            value={activeCreatorFilter}
+            onChange={(event) => setCreatorFilter(event.target.value)}
+          >
+            <option value="all">전체 등록자</option>
+            <option value="mine" disabled={!currentMember}>
+              내 일정{currentMember ? ` · ${currentMember.name}` : ""}
+            </option>
+            {Array.from(creators).map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+            <option value="unassigned">등록자 미지정</option>
+          </select>
+          {(filter !== "all" || activeCreatorFilter !== "all") && (
+            <button
+              type="button"
+              className="text-xs text-teal-700 hover:underline"
+              onClick={() => {
+                setFilter("all");
+                setCreatorFilter("all");
+              }}
+            >
+              필터 초기화
+            </button>
+          )}
+        </div>
+        {currentMember ? (
+          <span className="flex items-center gap-2 text-xs text-slate-400">
+            내 프로필
+            <CreatorBadge
+              name={currentMember.name}
+              color={currentMember.color}
+              compact
+            />
+          </span>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span>내 설정을 완료하고 내 이름으로 일정을 남겨 보세요.</span>
+            {onRegister && (
+              <button
+                type="button"
+                className="font-medium text-teal-700 hover:underline"
+                onClick={onRegister}
+              >
+                내 설정 열기
+              </button>
+            )}
+          </div>
+        )}
+      </div>
       {error && (
         <div
           role="alert"
@@ -422,18 +551,25 @@ export function DepartmentCalendar() {
                     key={item.id}
                     type="button"
                     onClick={() => edit(item)}
-                    title={`${EVENT_CATEGORIES[item.category].label} · ${item.title}`}
+                    title={`${EVENT_CATEGORIES[item.category].label} · ${item.title} · 등록자: ${item.creator_name || "미지정"}`}
                     className={cn(
                       "block w-full truncate rounded border-l-2 px-1.5 py-1 text-left text-[11px]",
                       EVENT_CATEGORIES[item.category].className,
                     )}
                   >
-                    {item.starts_at && (
-                      <span className="mr-1 opacity-70">
-                        {item.starts_at.slice(0, 5)}
-                      </span>
-                    )}
-                    {item.title}
+                    <span className="block truncate">
+                      {item.starts_at && (
+                        <span className="mr-1 opacity-70">
+                          {item.starts_at.slice(0, 5)}
+                        </span>
+                      )}
+                      {item.title}
+                    </span>
+                    <CreatorBadge
+                      name={item.creator_name}
+                      color={item.creator_color}
+                      compact
+                    />
                   </button>
                 ))}
                 {items.length > 3 && (
@@ -450,6 +586,7 @@ export function DepartmentCalendar() {
                 {items.slice(0, 5).map((item) => (
                   <span
                     key={item.id}
+                    title={`${item.title} · 등록자: ${item.creator_name || "미지정"}`}
                     className={cn(
                       "size-1.5 rounded-full",
                       EVENT_CATEGORIES[item.category].dot,
@@ -491,9 +628,9 @@ export function DepartmentCalendar() {
           <div className="rounded-xl border border-dashed border-slate-200 py-7 text-center">
             <CalendarDays className="mx-auto mb-2 size-6 text-slate-300" />
             <p className="text-sm text-slate-500">
-              {filter === "all"
+              {filter === "all" && activeCreatorFilter === "all"
                 ? "아직 등록된 일정이 없어요."
-                : "선택한 유형의 일정이 없어요."}
+                : "선택한 유형·등록자의 일정이 없어요."}
             </p>
             <p className="mt-1 text-xs text-slate-400">
               부서원과 함께할 첫 일정을 남겨 보세요.
@@ -521,6 +658,10 @@ export function DepartmentCalendar() {
                     {item.title}
                   </p>
                   <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                    <CreatorBadge
+                      name={item.creator_name}
+                      color={item.creator_color}
+                    />
                     <span className="flex items-center gap-1">
                       <Clock3 className="size-3" />
                       {item.starts_at?.slice(0, 5) ?? "종일"}
@@ -566,10 +707,30 @@ export function DepartmentCalendar() {
                 {editor?.original ? "부서 일정 수정" : "새 부서 일정"}
               </DialogTitle>
               <DialogDescription>
-                등록한 일정은 부서원 모두가 함께 보고 수정할 수 있습니다.
+                팀원 모두 함께 보고 수정할 수 있어요. 처음 등록한 사람은 그대로
+                표시됩니다.
               </DialogDescription>
             </DialogHeader>
             <fieldset disabled={busy} className="space-y-4 py-5">
+              <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
+                <CreatorBadge
+                  name={
+                    editor?.original
+                      ? editor.original.creator_name
+                      : currentMember?.name
+                  }
+                  color={
+                    editor?.original
+                      ? editor.original.creator_color
+                      : currentMember?.color
+                  }
+                />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  {editor?.original
+                    ? "등록자는 담당자·참석자와 별도로 기록됩니다."
+                    : "현재 선택한 내 프로필로 등록합니다."}
+                </p>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="event-title">일정명</Label>
                 <Input
@@ -577,7 +738,7 @@ export function DepartmentCalendar() {
                   autoFocus
                   required
                   maxLength={200}
-                  placeholder="예) 금요일 부서 회식"
+                  placeholder="예) 제안서 초안 작성, 금요일 팀 회식"
                   value={editor?.input.title ?? ""}
                   onChange={(e) => patch({ title: e.target.value })}
                 />
@@ -587,7 +748,7 @@ export function DepartmentCalendar() {
                 <select
                   id="event-category"
                   className="h-9 w-full rounded-lg border bg-background px-3 text-sm"
-                  value={editor?.input.category ?? "meeting"}
+                  value={editor?.input.category ?? "work"}
                   onChange={(e) =>
                     patch({ category: e.target.value as EventCategory })
                   }
@@ -719,7 +880,11 @@ export function DepartmentCalendar() {
               <Button
                 type="submit"
                 className={primary}
-                disabled={busy || !editor?.input.title.trim()}
+                disabled={
+                  busy ||
+                  !editor?.input.title.trim() ||
+                  (!editor?.original && !currentMember)
+                }
               >
                 {busy ? "처리 중…" : "저장"}
               </Button>

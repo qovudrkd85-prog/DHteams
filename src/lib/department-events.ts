@@ -1,6 +1,12 @@
 import { createClient } from "@/lib/supabase/client";
+import type { TeamMember } from "@/lib/team/workspace";
 
 export const EVENT_CATEGORIES = {
+  work: {
+    label: "업무",
+    className: "bg-teal-50 text-teal-800 border-teal-200",
+    dot: "bg-teal-600",
+  },
   meeting: {
     label: "회의",
     className: "bg-blue-50 text-blue-800 border-blue-200",
@@ -42,6 +48,9 @@ export interface DepartmentEvent extends DepartmentEventInput {
   id: string;
   updated_at: string;
   deleted_at: string | null;
+  created_by?: string | null;
+  creator_name?: string | null;
+  creator_color?: string | null;
 }
 
 export function dateKey(date: Date): string {
@@ -64,6 +73,14 @@ function databaseError(error: { code?: string; message: string }): Error {
   if (["PGRST205", "42P01"].includes(error.code ?? "")) {
     return new Error(
       "부서 일정 저장소가 아직 준비되지 않았습니다. 관리자에게 초기 설정을 요청해 주세요.",
+    );
+  }
+  if (
+    ["PGRST204", "42703"].includes(error.code ?? "") ||
+    (error.code === "23514" && /category/.test(error.message))
+  ) {
+    return new Error(
+      "업무 일정과 등록자 표시를 위한 업데이트가 필요합니다. 관리자에게 팀 공간 데이터 설정을 요청해 주세요.",
     );
   }
   return new Error(error.message);
@@ -96,16 +113,36 @@ export async function listDepartmentEvents(
 export async function saveDepartmentEvent(
   input: DepartmentEventInput,
   original?: DepartmentEvent,
+  creator?: Pick<TeamMember, "id" | "name" | "color"> | null,
 ): Promise<DepartmentEvent> {
+  if (!original && !creator) {
+    throw new Error("먼저 내 팀원을 등록하거나 선택한 뒤 일정을 등록해 주세요.");
+  }
+  // Only event content is editable. The creator snapshot survives shared edits.
+  const content: DepartmentEventInput = {
+    title: input.title,
+    category: input.category,
+    starts_on: input.starts_on,
+    ends_on: input.ends_on,
+    starts_at: input.starts_at,
+    location: input.location,
+    organizer: input.organizer,
+    note: input.note,
+  };
   const client = createClient();
   const query = original
     ? client
         .from("department_events")
-        .update(input)
+        .update(content)
         .eq("id", original.id)
         .eq("updated_at", original.updated_at)
         .is("deleted_at", null)
-    : client.from("department_events").insert(input);
+    : client.from("department_events").insert({
+        ...content,
+        created_by: creator!.id,
+        creator_name: creator!.name,
+        creator_color: creator!.color,
+      });
   const { data, error } = await query.select().maybeSingle();
   if (error) throw databaseError(error);
   if (!data)

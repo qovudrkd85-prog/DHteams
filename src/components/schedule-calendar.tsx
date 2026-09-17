@@ -76,7 +76,13 @@ type EditState =
 const errorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
 
-export function ScheduleCalendar({ projectId }: { projectId: string }) {
+export function ScheduleCalendar({
+  projectId,
+  refreshKey = 0,
+}: {
+  projectId: string;
+  refreshKey?: number;
+}) {
   const [month, setMonth] = useState(() => new Date());
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [edit, setEdit] = useState<EditState | null>(null);
@@ -103,7 +109,7 @@ export function ScheduleCalendar({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     void reload();
-  }, [reload]);
+  }, [reload, refreshKey]);
 
   const cells = useMemo(() => buildMonthCells(month), [month]);
 

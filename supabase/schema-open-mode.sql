@@ -26,6 +26,7 @@ drop policy if exists nodes_open        on public.nodes;
 drop policy if exists logs_select       on public.file_logs;
 drop policy if exists logs_write        on public.file_logs;
 drop policy if exists logs_open         on public.file_logs;
+drop policy if exists file_logs_open    on public.file_logs;
 
 -- 3) 공개 정책 (익명 접속 허용)
 create policy projects_open on public.projects

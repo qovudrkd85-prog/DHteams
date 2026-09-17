@@ -7,7 +7,7 @@ const STEPS = [
   },
   {
     title: "2. 테이블 만들기",
-    body: "Supabase 대시보드의 SQL Editor 에 프로젝트 폴더의 supabase/schema.sql 내용을 통째로 붙여넣고 Run 합니다.",
+    body: "프로젝트 폴더의 supabase/README.md에 있는 설치 순서대로 SQL을 실행합니다. schema-accounts.sql을 마지막에 적용한 뒤 Authentication에서 Email 로그인과 회원가입을 켜고 Confirm Email을 끕니다.",
   },
   {
     title: "3. 환경변수 넣기",
@@ -22,9 +22,9 @@ const STEPS = [
 export default function SetupPage() {
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 p-6">
-      <h1 className="mb-1 text-2xl font-semibold">초기 설정이 필요합니다</h1>
+      <h1 className="mb-1 text-2xl font-semibold">설치 안내</h1>
       <p className="mb-6 text-sm text-muted-foreground">
-        Supabase 연결 정보가 없어서 데이터를 불러올 수 없습니다. 아래 순서대로 진행하세요.
+        새 팀 공간을 설치할 때 사용하는 관리자용 안내입니다.
       </p>
 
       <div className="space-y-3">

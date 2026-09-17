@@ -1,35 +1,22 @@
-import { createBrowserClient } from "@supabase/ssr";
+import { createClient as createSupabaseClient, type SupabaseClient } from "@supabase/supabase-js";
 
-// Vercel 환경변수 누락 대비 기본값 (브라우저에 노출되는 공개 값)
-const FALLBACK_URL = "https://yquxrohbiplkrtupkndo.supabase.co";
+// Configuration and authentication are checked by /api/session on the server.
+export const isSupabaseConfigured = true;
+let client: SupabaseClient | undefined;
 
-/**
- * 서버 차단 모드: 브라우저가 Supabase 대신 우리 서버(/api/db)로만 요청한다.
- * Supabase 주소·키는 서버에만 두고 브라우저 코드에는 넣지 않는다.
- */
-export const SECURE_MODE = process.env.NEXT_PUBLIC_SECURE_MODE === "1";
-
-export const SUPABASE_URL = SECURE_MODE
-  ? "/api/db"
-  : process.env.NEXT_PUBLIC_SUPABASE_URL || FALLBACK_URL;
-
-export const SUPABASE_PUBLISHABLE_KEY = SECURE_MODE
-  ? "proxied"
-  : (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "");
-
-export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
-
-export function createClient() {
-  if (!isSupabaseConfigured) {
-    throw new Error(
-      "Supabase 환경변수가 없습니다. .env.local 에 NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY 를 설정하세요.",
-    );
+export function createClient(): SupabaseClient {
+  if (typeof window === "undefined") throw new Error("데이터 클라이언트는 브라우저에서 사용해 주세요.");
+  if (!client) {
+    client = createSupabaseClient(`${window.location.origin}/api/db`, "proxied", {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: {
+        fetch: async (input, init) => {
+          const response = await fetch(input, { ...init, credentials: "same-origin", cache: "no-store" });
+          if (response.status === 401) window.dispatchEvent(new Event("teams:session-expired"));
+          return response;
+        },
+      },
+    });
   }
-
-  const url =
-    SECURE_MODE && typeof window !== "undefined"
-      ? `${window.location.origin}/api/db`
-      : SUPABASE_URL;
-
-  return createBrowserClient(url, SUPABASE_PUBLISHABLE_KEY);
+  return client;
 }
