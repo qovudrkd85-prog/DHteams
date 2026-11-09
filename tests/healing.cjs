@@ -86,5 +86,38 @@ console.log("PASS: healing weather mapping, scene suggestion, timer text, weathe
   assert.equal(s4.isApplied(), false);
   assert.equal(await s4.end(), false);
   assert.equal(server, "외근");
-  console.log("PASS: healing status session survives quick reopen, clears leftovers, never undoes failed writes.");
+  // A failed restore keeps its target: the next session must not lose "외근".
+  const s5 = h.startHealingStatus(server, write);
+  assert.equal(await s5.applied, true);
+  failNext = true;
+  await assert.rejects(s5.end());
+  assert.equal(server, h.HEALING_STATUS);
+  const s6 = h.startHealingStatus(server, write);
+  assert.equal(s6.original, "외근", "reopen after a failed restore inherits its target");
+  await s6.applied; await s6.end(); await tick();
+  assert.equal(server, "외근");
+  // ...but a status the user changed since then wins over the stale target.
+  const s7 = h.startHealingStatus(server, write);
+  await s7.applied; failNext = true; await assert.rejects(s7.end());
+  server = "출장";
+  const s8 = h.startHealingStatus(server, write);
+  assert.equal(s8.original, "출장");
+  await s8.applied; await s8.end(); await tick();
+  assert.equal(server, "출장");
+  // Page unload while the apply still waits: never send it, and restore the original.
+  const s9 = h.startHealingStatus(server, write);
+  await s9.applied;
+  const end9 = s9.end();
+  const s10 = h.startHealingStatus(h.HEALING_STATUS, write);
+  assert.equal(s10.unload(), "출장");
+  await end9;
+  assert.equal(await s10.applied, false, "no apply after unload");
+  await tick(); await new Promise((r) => setTimeout(r, 20));
+  assert.equal(server, "출장");
+  // Unload after a failed apply sends nothing.
+  failNext = true;
+  const s11 = h.startHealingStatus(server, write);
+  await s11.applied;
+  assert.equal(s11.unload(), null);
+  console.log("PASS: healing status session survives quick reopen, clears leftovers, never undoes failed writes, keeps failed restore target, cancels apply on unload.");
 })().catch((error) => { console.error(error); process.exit(1); });

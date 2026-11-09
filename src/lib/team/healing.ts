@@ -55,34 +55,48 @@ export interface HealingStatusSession {
   isApplied: () => boolean;
   /** Restores the original; resolves false when nothing was ours to undo. Rejects if the restore write fails. */
   end: () => Promise<boolean>;
+  /** Page is going away: cancels an apply not yet sent; returns the message to send with keepalive, or null. */
+  unload: () => string | null;
 }
 
-// One restore in flight at a time; a quick reopen waits for it and inherits its target.
-let pendingRestore: { done: Promise<unknown>; original: string } | null = null;
+// Last restore that has not succeeded yet. A quick reopen waits for it and inherits its target;
+// a failed restore stays here so the next session still knows the real original.
+let pendingRestore: { done: Promise<boolean>; original: string } | null = null;
 
 /** Shows teammates I am resting, ordered after any unfinished restore from the last session. */
 export function startHealingStatus(current: string, write: StatusWriter): HealingStatusSession {
   const prior = pendingRestore;
-  // Leftover HEALING_STATUS with no restore pending = interrupted session: clear it on leave.
-  const original = prior ? prior.original : current === HEALING_STATUS ? "" : current;
-  const alreadyHealing = !prior && current === HEALING_STATUS;
-  let landed = false;
-  const applied = (prior?.done ?? Promise.resolve())
-    .then(() => alreadyHealing
-      ? true
-      : write(HEALING_STATUS).then((member) => member.status_message === HEALING_STATUS, () => false))
-    .then((ok) => { landed = ok; return ok; });
+  // Inherit only while the server still shows our healing message; a newer user status wins.
+  const inherit = prior !== null && current === HEALING_STATUS;
+  // Leftover HEALING_STATUS with no restore record = interrupted session: clear it on leave.
+  const original = inherit ? prior.original : current === HEALING_STATUS ? "" : current;
+  const alreadyHealing = prior === null && current === HEALING_STATUS;
+  let state: "pending" | "landed" | "failed" = "pending";
+  let unloading = false;
+  const applied = (prior?.done ?? Promise.resolve(true))
+    .then(() => {
+      // Never start a write the unloading page could not undo.
+      if (unloading) return false;
+      if (alreadyHealing) return true;
+      return write(HEALING_STATUS).then((member) => member.status_message === HEALING_STATUS, () => false);
+    })
+    .then((ok) => { state = ok ? "landed" : "failed"; return ok; });
   return {
     applied,
     original,
-    isApplied: () => landed,
+    isApplied: () => state === "landed",
     end() {
       // Never undo a write that did not land.
       const done = applied.then((ok) => (ok ? write(original).then(() => true) : false));
-      const entry = { done: done.catch(() => undefined), original };
+      const entry = { done: done.then(() => true, () => false), original };
       pendingRestore = entry;
-      void entry.done.then(() => { if (pendingRestore === entry) pendingRestore = null; });
+      void entry.done.then((restored) => { if (restored && pendingRestore === entry) pendingRestore = null; });
       return done;
+    },
+    unload() {
+      unloading = true;
+      // Pending = our apply or the prior restore may still land; restoring the same target is safe.
+      return state === "failed" ? null : original;
     },
   };
 }

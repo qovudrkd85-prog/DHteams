@@ -61,6 +61,9 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
   const statusAtOpen = useRef(account?.member.status_message ?? "");
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  // Latest onClose for window listeners registered once per open.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
   const sceneId = prefs.sceneId === "auto" ? (weather ? sceneForWeather(weather) : "beach") : prefs.sceneId;
   const scene = findScene(sceneId);
@@ -126,10 +129,17 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
   // Show teammates I am resting; restore the previous message when I leave. Failures never block the view.
   useEffect(() => {
     const session = startHealingStatus(statusAtOpen.current, updateStatus);
-    const onPageHide = () => { if (session.isApplied()) restoreOnUnload(session.original); };
+    const onPageHide = () => {
+      const message = session.unload();
+      if (message !== null) restoreOnUnload(message);
+    };
+    // Back from bfcache: the status was already restored, so end the view too (reopen starts a fresh session).
+    const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) onCloseRef.current(); };
     window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
     return () => {
       window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
       session.end().catch(() => { toast.error("상태 메시지를 되돌리지 못했어요. 내 설정에서 바꿔 주세요."); });
     };
     // Run once per open; account changes during the session must not re-trigger.
