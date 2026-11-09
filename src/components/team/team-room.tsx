@@ -35,16 +35,21 @@ export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMin
   const [room, setRoom] = useState<OfficeLayout | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  // Bumped by every load and mutation; a response from an older generation is dropped.
+  const generation = useRef(0);
   const game = useOfficePresence({ member: currentMember, layout: room, paused: busy || loading, viewportRef });
 
   async function load(): Promise<void> {
+    const ticket = ++generation.current;
     try {
       const next = pickTeamRoom(await listOfficeLayouts());
+      if (ticket !== generation.current) return;
       setRoom(next);
-      setError(next ? null : NO_ROOM);
+      setLoadError(next ? null : NO_ROOM);
     } catch (reason) {
-      setError(errorMessage(reason));
+      if (ticket === generation.current) setLoadError(errorMessage(reason));
     } finally {
       setLoading(false);
     }
@@ -54,17 +59,24 @@ export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMin
     let active = true;
     const refresh = async () => {
       if (!active || document.visibilityState !== "visible" || busyRef.current) return;
+      const ticket = ++generation.current;
       try {
         const next = pickTeamRoom(await listOfficeLayouts());
-        if (active) setRoom(next);
-      } catch { /* Keep the last room; the next tick retries. */ }
+        if (!active || ticket !== generation.current || busyRef.current) return;
+        setRoom(next);
+        setLoadError(next ? null : NO_ROOM);
+      } catch (reason) {
+        // Keep the last room on screen; show the sync problem until a later tick succeeds.
+        if (active && ticket === generation.current) setLoadError(errorMessage(reason));
+      }
     };
+    const first = ++generation.current;
     listOfficeLayouts().then((rows) => {
-      if (!active) return;
+      if (!active || first !== generation.current) return;
       const next = pickTeamRoom(rows);
       setRoom(next);
-      setError(next ? null : NO_ROOM);
-    }).catch((reason) => { if (active) setError(errorMessage(reason)); })
+      setLoadError(next ? null : NO_ROOM);
+    }).catch((reason) => { if (active && first === generation.current) setLoadError(errorMessage(reason)); })
       .finally(() => { if (active) setLoading(false); });
     const timer = window.setInterval(() => { void refresh(); }, 3_000);
     return () => { active = false; window.clearInterval(timer); };
@@ -83,17 +95,22 @@ export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMin
   async function sitDown(): Promise<void> {
     if (!room || !currentMember || busy) return;
     busyRef.current = true;
+    generation.current++; // Drop any refresh already in flight.
     setBusy(true);
-    setError(null);
+    setActionError(null);
+    let layout = room;
     try {
-      let layout = room;
       const { draft, deskId } = withOwnDesk(layout, currentMember.id);
       if (draft) layout = await saveOfficeLayout(draft, layout);
       if (layout.items.find((item) => item.id === deskId)?.member_id !== currentMember.id) layout = await claimOfficeSeat(layout.id, deskId);
+      generation.current++;
       pendingSit.current = deskId;
       setRoom(layout);
     } catch (reason) {
-      setError(errorMessage(reason));
+      // Keep a desk that was already saved so a retry reuses it instead of hitting a stale-version conflict.
+      generation.current++;
+      if (layout !== room) setRoom(layout);
+      setActionError(errorMessage(reason));
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -103,7 +120,9 @@ export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMin
   const today = officeDateKey();
   const presentIds = new Set(attendance.filter((row) => row.work_date === today && row.checked_in_at && !row.checked_out_at).map((row) => row.member_id));
   const memberById = new Map(members.map((member) => [member.id, member]));
-  const onlineIds = new Set([...game.peers.map((row) => row.member_id), ...(game.player && currentMember ? [currentMember.id] : [])]);
+  // Presence rows are never cleared, so only count peers who are also checked in today.
+  const livePeers = game.peers.filter((row) => presentIds.has(row.member_id));
+  const onlineIds = new Set([...livePeers.map((row) => row.member_id), ...(game.player && currentMember ? [currentMember.id] : [])]);
   const online = members.filter((member) => onlineIds.has(member.id));
   const seated = game.player?.motion === "seated";
   const width = room?.canvas_width ?? 1000;
@@ -130,7 +149,7 @@ export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMin
             <WorldArt width={width} height={height} kind="office" patternId={patternId} editing={false} />
             {desks.map((item) => {
               const member = item.member_id ? memberById.get(item.member_id) : undefined;
-              const presence = member?.id === currentMember?.id ? game.player : game.peers.find((row) => row.member_id === member?.id);
+              const presence = member?.id === currentMember?.id ? game.player : livePeers.find((row) => row.member_id === member?.id);
               const isSeated = Boolean(member && presence?.motion === "seated");
               const own = Boolean(member && member.id === currentMember?.id);
               const label = member?.name ?? (item.member_id ? "등록 해제된 팀원" : "빈 자리");
@@ -146,7 +165,7 @@ export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMin
           </svg>
         </div>
       ) : null}
-      {error && <div className={styles.error} role="alert"><p>{error}</p>{!room && <button type="button" onClick={() => { setLoading(true); void load(); }}><RotateCw size={14} /> 다시 불러오기</button>}</div>}
+      {(actionError ?? loadError) && <div className={styles.error} role="alert"><p>{actionError ?? loadError}</p>{!room && <button type="button" onClick={() => { setLoading(true); void load(); }}><RotateCw size={14} /> 다시 불러오기</button>}</div>}
       {game.syncError && <p className="px-4 pt-2 text-xs text-amber-700" role="status">{game.syncError}</p>}
       <div className="flex gap-2 p-4">
         {seated ? (
