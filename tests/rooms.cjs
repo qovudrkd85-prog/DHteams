@@ -24,6 +24,11 @@ r.saveHubView("garage");
 assert.equal(r.loadHubView(), "garage");
 storage.set("teams-hub-view", "outdoor");
 assert.equal(r.loadHubView(), "team");
+const blocked = { exports: {}, module: { exports: {} }, crypto: sandbox.crypto, window: { localStorage: { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } } } };
+blocked.exports = blocked.module.exports;
+vm.runInNewContext(outputText, blocked);
+blocked.module.exports.saveHubView("garage");
+assert.equal(blocked.module.exports.loadHubView(), "garage", "memory fallback");
 
 // Team room pick.
 const room = (id, kind, key, extra = {}) => ({ id, name: id, theme: "sage", items: [], updated_at: "t", canvas_width: 1000, canvas_height: 560, room_kind: kind, room_key: key, ...extra });

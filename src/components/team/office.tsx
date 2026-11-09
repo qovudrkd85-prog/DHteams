@@ -85,7 +85,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "배치도를 처리하지 못했어요. 잠시 후 다시 시도해 주세요.";
 }
 
-function FurnitureArt({ item, member, present }: { item: OfficeItem; member?: TeamMember; present: boolean }) {
+export function FurnitureArt({ item, member, present }: { item: OfficeItem; member?: TeamMember; present: boolean }) {
   const characterSeed = member ? Array.from(member.avatar + member.name).reduce((sum, char) => sum + (char.codePointAt(0) ?? 0), 0) : 0;
   const skin = ["#efc8a6", "#ddb18f", "#bc896b", "#f2d6bd"][characterSeed % 4];
   const hair = ["#4f4038", "#76604b", "#353d3b", "#916647"][Math.floor(characterSeed / 3) % 4];

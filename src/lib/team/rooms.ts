@@ -6,16 +6,22 @@ const HUB_VIEW_KEY = "teams-hub-view";
 const DESK_GAP = 150;
 const GROW_SIZES: readonly [number, number][] = [[1600, 900], [2200, 1100], [2400, 1200]];
 
+// Fallback so tabs still switch when browser storage is blocked.
+let memoryView: HubView = "team";
+
 export function loadHubView(): HubView {
   try {
-    return window.localStorage.getItem(HUB_VIEW_KEY) === "garage" ? "garage" : "team";
+    const stored = window.localStorage.getItem(HUB_VIEW_KEY);
+    if (stored === null) return memoryView;
+    return stored === "garage" ? "garage" : "team";
   } catch {
-    return "team";
+    return memoryView;
   }
 }
 
 export function saveHubView(view: HubView): void {
-  try { window.localStorage.setItem(HUB_VIEW_KEY, view); } catch { /* View choice can stay session-only. */ }
+  memoryView = view;
+  try { window.localStorage.setItem(HUB_VIEW_KEY, view); } catch { /* View choice stays in memory. */ }
 }
 
 // The team room is the team's first office; yard/cafe/extra offices stay in the DB but are not shown.

@@ -7,9 +7,10 @@ import { toast } from "sonner";
 import { ArrowUpRight, FolderOpen, Search, Sprout } from "lucide-react";
 
 import { AppHeader } from "@/components/app-header";
-import { CalendarLauncher } from "@/components/team/calendar-launcher";
-import { TeamOffice } from "@/components/team/office";
+import { DepartmentCalendar } from "@/components/department-calendar";
+import { HubTabs, useHubView } from "@/components/team/hub-tabs";
 import { TeamPanel } from "@/components/team/panel";
+import { TeamRoomMini } from "@/components/team/team-room";
 import { TrashDialog } from "@/components/trash-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +41,7 @@ export default function HomePage() {
   const [trashOpen, setTrashOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [view, changeView] = useHubView();
   const visibleProjects = projects.filter((project) =>
     `${project.name} ${project.code ?? ""}`
       .toLocaleLowerCase()
@@ -113,7 +115,6 @@ export default function HomePage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <CalendarLauncher workspace={workspace} />
             <Button variant="outline" onClick={() => setTrashOpen(true)}>
               휴지통
             </Button>
@@ -182,21 +183,37 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="mb-5"><HubTabs view={view} onChange={changeView} /></div>
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="min-w-0 space-y-5">
-            <TeamOffice
-              members={workspace.members}
-              attendance={workspace.attendance}
-              currentMember={workspace.currentMember}
-              loading={workspace.loading || !!workspace.error}
-              onRegister={() => workspace.setProfileOpen(true)}
-            />
+            {view === "team" ? (
+              <section className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:p-5" aria-label="우리 팀 달력" data-testid="team-calendar-inline">
+                <DepartmentCalendar
+                  members={workspace.members}
+                  currentMember={workspace.error ? null : workspace.currentMember}
+                  onRegister={() => workspace.setProfileOpen(true)}
+                />
+              </section>
+            ) : (
+              <section aria-label="내 정비실" data-testid="garage">
+                <TeamPanel workspace={workspace} />
+              </section>
+            )}
           </div>
           <aside
             className="min-w-0 space-y-4 lg:sticky lg:top-20"
-            aria-label="과업 목록"
+            aria-label="팀 방과 과업 목록"
           >
-            <TeamPanel workspace={workspace} />
+            {view === "team" && (
+              <>
+                <TeamRoomMini
+                  members={workspace.members}
+                  attendance={workspace.attendance}
+                  currentMember={workspace.error ? null : workspace.currentMember}
+                />
+                <TeamPanel workspace={workspace} />
+              </>
+            )}
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-100 p-5">
                 <div className="mb-1 flex items-center gap-2">
