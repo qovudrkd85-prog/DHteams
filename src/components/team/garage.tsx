@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Waves } from "lucide-react";
 import { DepartmentCalendar } from "@/components/department-calendar";
 import { TeamPanel } from "@/components/team/panel";
@@ -35,10 +36,16 @@ export function Garage({ workspace, healing, onHealingEnd }: GarageProps) {
 
 interface HealingCardProps {
   onOpen: () => void;
+  /** Take keyboard focus when shown again after healing ends. */
+  focusOnMount?: boolean;
 }
 
 /** Side card that opens the healing place in the garage area. */
-export function HealingCard({ onOpen }: HealingCardProps) {
+export function HealingCard({ onOpen, focusOnMount = false }: HealingCardProps) {
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (focusOnMount) buttonRef.current?.focus();
+  }, [focusOnMount]);
   return (
     <section className="rounded-2xl bg-gradient-to-br from-sky-700 to-teal-700 p-5 text-white shadow-sm" aria-label="힐링 타임">
       <h2 className="flex items-center gap-2 font-semibold"><Waves className="size-4" /> 힐링 타임</h2>
@@ -46,6 +53,7 @@ export function HealingCard({ onOpen }: HealingCardProps) {
       <button
         type="button"
         className="mt-4 w-full rounded-xl bg-white/95 py-2 text-sm font-semibold text-teal-800 hover:bg-white"
+        ref={buttonRef}
         data-testid="healing-open"
         onClick={onOpen}
       >

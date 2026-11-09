@@ -26,7 +26,7 @@ const HEALING_STATUS = "힐링 타임 중 · 잠시 쉬어요";
 // Fire-and-forget restore that survives tab close/refresh.
 function restoreOnUnload(statusMessage: string): void {
   try {
-    void fetch("/api/account/status", { method: "PATCH", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ statusMessage }) });
+    void fetch("/api/account/status", { method: "PATCH", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ statusMessage }) }).catch(() => undefined);
   } catch { /* Best effort only. */ }
 }
 
@@ -81,7 +81,12 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
   useEffect(() => {
     closeRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { onClose(); return; }
+      if (event.key === "Escape") {
+        // Inline: only Esc from inside the place, and never one another widget already handled.
+        const inside = event.target instanceof Node && Boolean(dialogRef.current?.contains(event.target));
+        if (!inline || (inside && !event.defaultPrevented)) onClose();
+        return;
+      }
       if (inline || event.key !== "Tab") return;
       // Keep focus inside the modal.
       const root = dialogRef.current;

@@ -44,8 +44,14 @@ export default function HomePage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [view, changeView] = useHubView();
   const [healing, setHealing] = useState(false);
-  // Leaving the garage tab always ends the healing scene.
-  const switchView = (next: Parameters<typeof changeView>[0]) => { setHealing(false); changeView(next); };
+  // Set when healing just ended, so the card takes focus back.
+  const [healingEnded, setHealingEnded] = useState(false);
+  const [seenView, setSeenView] = useState(view);
+  if (seenView !== view) {
+    // Any route out of the garage (tab click, storage sync) ends the healing scene.
+    setSeenView(view);
+    if (view !== "garage") { setHealing(false); setHealingEnded(false); }
+  }
   const visibleProjects = projects.filter((project) =>
     `${project.name} ${project.code ?? ""}`
       .toLocaleLowerCase()
@@ -187,7 +193,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="mb-5"><HubTabs view={view} onChange={switchView} /></div>
+        <div className="mb-5"><HubTabs view={view} onChange={changeView} /></div>
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="min-w-0 space-y-5">
             {view === "team" ? (
@@ -199,7 +205,7 @@ export default function HomePage() {
                 />
               </section>
             ) : (
-              <Garage workspace={workspace} healing={healing} onHealingEnd={() => setHealing(false)} />
+              <Garage workspace={workspace} healing={healing} onHealingEnd={() => { setHealing(false); setHealingEnded(true); }} />
             )}
           </div>
           <aside
@@ -216,7 +222,7 @@ export default function HomePage() {
                 <TeamPanel workspace={workspace} />
               </>
             )}
-            {view === "garage" && !healing && <HealingCard onOpen={() => setHealing(true)} />}
+            {view === "garage" && !healing && <HealingCard focusOnMount={healingEnded} onOpen={() => { setHealing(true); setHealingEnded(false); }} />}
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-100 p-5">
                 <div className="mb-1 flex items-center gap-2">
