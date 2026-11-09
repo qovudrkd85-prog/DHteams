@@ -14,6 +14,7 @@ export interface TeamMember {
   username?: string | null;
   profile_completed?: boolean;
   status_message?: string;
+  team_id?: string | null;
   name: string;
   role: string;
   avatar: string;

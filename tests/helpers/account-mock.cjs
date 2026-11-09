@@ -17,12 +17,14 @@ async function installAccountMock(context, { members = [], authenticated = true 
     failProfile: false,
     failStatus: false,
     registrationAvailable: true,
+    team: { id: "00000000-0000-4000-8000-0000000000aa", name: "시험 팀", invite_code: "K7QM3XPA", is_owner: true, can_rotate_code: true },
     accounts,
     get account() { return current; },
     useMember(index) { current = accounts[index] ?? null; },
     expire() { current = null; },
   };
-  const identity = () => current ? { id: current.id, username: current.username, member: current.member } : null;
+  // Browser fixtures start inside a team so pages render past the team gate.
+  const identity = () => current ? { id: current.id, username: current.username, member: current.member, team: state.team } : null;
   const payload = () => ({ configured: state.configured, authenticated: Boolean(current), account: identity() });
 
   await context.route("**/api/session", async (route) => {

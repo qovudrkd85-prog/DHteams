@@ -34,8 +34,11 @@ export const EVENT_CATEGORIES = {
   },
 } as const;
 export type EventCategory = keyof typeof EVENT_CATEGORIES;
+// team: shared with my team. private: only the creator sees it, independent of team.
+export type EventVisibility = "team" | "private";
 export interface DepartmentEventInput {
   title: string;
+  visibility: EventVisibility;
   category: EventCategory;
   starts_on: string;
   ends_on: string;
@@ -49,6 +52,7 @@ export interface DepartmentEvent extends DepartmentEventInput {
   updated_at: string;
   deleted_at: string | null;
   created_by?: string | null;
+  team_id?: string | null;
   creator_name?: string | null;
   creator_color?: string | null;
 }
@@ -121,6 +125,7 @@ export async function saveDepartmentEvent(
   // Only event content is editable. The creator snapshot survives shared edits.
   const content: DepartmentEventInput = {
     title: input.title,
+    visibility: input.visibility,
     category: input.category,
     starts_on: input.starts_on,
     ends_on: input.ends_on,

@@ -126,8 +126,25 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     await page.getByTestId("office-item-empty-desk").click();
     await office.getByRole("button", { name: "자리에 앉기", exact: true }).click();
     await waitMotion("seated");
+    // Healing time: only from my own seat, real 360° photo, weather overlay, Esc closes.
+    await page.route("https://api.open-meteo.com/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ current: { weather_code: 61, is_day: 1, temperature_2m: 14.2 } }) }));
+    await page.getByTestId("healing-open").click();
+    const healing = page.getByTestId("healing-overlay");
+    await healing.waitFor();
+    await page.getByTestId("healing-weather").filter({ hasText: "비" }).waitFor();
+    await page.getByTestId("healing-effect-rain").waitFor();
+    assert.match(await healing.getAttribute("aria-label"), /옥상 쉼터/, "Rain should suggest the rooftop.");
+    await page.waitForFunction(() => !document.querySelector("[data-testid=healing-overlay]")?.textContent?.includes("불러오는 중"), null, { timeout: 20000 });
+    await page.getByRole("button", { name: /낚시터/ }).click();
+    await page.waitForFunction(() => !document.querySelector("[data-testid=healing-overlay]")?.textContent?.includes("불러오는 중"), null, { timeout: 20000 });
+    const shotPath = path.resolve(__dirname, "../artifacts/logs/healing-fishing.png");
+    const shot = await page.screenshot({ path: shotPath });
+    assert.ok(shot.length > 50_000, "Panorama screenshot looks empty.");
+    await page.keyboard.press("Escape");
+    await healing.waitFor({ state: "detached" });
     await office.getByRole("button", { name: "일어나기", exact: true }).click();
     await waitMotion("standing");
+    assert.equal(await page.getByTestId("healing-open").count(), 0, "Healing is only offered while seated.");
     await world.focus();
     const beforeWalking = await position();
     await holdArrow("ArrowDown");

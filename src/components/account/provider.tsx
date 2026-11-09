@@ -6,6 +6,7 @@ import type { Account, ProfileInput, SessionPayload } from "@/lib/account/types"
 import type { TeamMember } from "@/lib/team/workspace";
 import { LoginForm } from "./login-form";
 import { AccountSettingsDialog } from "./settings-dialog";
+import { TeamGate } from "./team-gate";
 
 type AccountContextValue = {
   account: Account | null;
@@ -18,7 +19,14 @@ type AccountContextValue = {
   updateProfile: (input: ProfileInput) => Promise<void>;
   updateStatus: (statusMessage: string) => Promise<TeamMember>;
   changePassword: (currentPassword: string, password: string) => Promise<void>;
+  teamAction: (input: TeamActionInput) => Promise<void>;
 };
+
+export type TeamActionInput =
+  | { action: "create"; name: string }
+  | { action: "join"; code: string }
+  | { action: "leave" }
+  | { action: "regenerate" };
 
 const AccountContext = createContext<AccountContextValue | null>(null);
 const connectionError = "서버에 연결하지 못했습니다. 연결을 확인하고 다시 시도해 주세요.";
@@ -147,7 +155,11 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
     return data.member;
   }, [mutateAccount]);
   const changePassword = useCallback(async (currentPassword: string, password: string) => { await mutateAccount("/api/account/password", "POST", { currentPassword, password }); }, [mutateAccount]);
-  const value: AccountContextValue = { account, loading, error, settingsOpen, setSettingsOpen, refresh, signOut, updateProfile, updateStatus, changePassword };
+  const teamAction = useCallback(async (input: TeamActionInput) => {
+    const data = await mutateAccount("/api/team", "POST", input);
+    if (!data.account) throw new Error("팀 정보를 확인하지 못했습니다. 새로고침해 주세요.");
+  }, [mutateAccount]);
+  const value: AccountContextValue = { account, loading, error, settingsOpen, setSettingsOpen, refresh, signOut, updateProfile, updateStatus, changePassword, teamAction };
 
   return (
     <AccountContext.Provider value={value}>
@@ -156,9 +168,10 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
           <LoaderCircle className="size-4 animate-spin" /> 우리 팀 공간을 여는 중…
         </main>
       ) : account ? (
-        <Fragment key={account.id}>
+        // Team switch remounts the workspace so no data from the previous team stays in memory.
+        <Fragment key={`${account.id}:${account.team?.id ?? "none"}`}>
           {error && <div role="alert" className="bg-amber-50 px-4 py-2 text-center text-xs leading-6 text-amber-900">{error}<button type="button" className="ml-3 underline underline-offset-4" onClick={() => void refresh()}>다시 확인</button></div>}
-          {account.member.profile_completed ? children : <main className="flex min-h-dvh items-center justify-center bg-[#f5f7f1] p-6 text-sm text-teal-800">내 프로필을 설정하고 우리 사무실에 합류해요.</main>}
+          {account.member.profile_completed ? (account.team ? children : <TeamGate />) : <main className="flex min-h-dvh items-center justify-center bg-[#f5f7f1] p-6 text-sm text-teal-800">내 프로필을 설정하고 우리 사무실에 합류해요.</main>}
           <AccountSettingsDialog />
         </Fragment>
       ) : (

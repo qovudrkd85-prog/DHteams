@@ -3,6 +3,15 @@
 -- 재실행할 수 있으며 다른 팀원의 자리 배정은 변경하거나 삭제할 수 없습니다.
 begin;
 
+-- Re-running this file after schema-teams.sql would reopen cross-team access. Stop instead.
+do $$
+begin
+  if to_regclass('public.teams') is not null then
+    raise exception '팀 공간(schema-teams.sql)이 설치된 DB입니다. 이 파일만 다시 실행하면 팀 격리가 풀립니다. 실행을 중단했습니다.' using errcode = 'P0001';
+  end if;
+end;
+$$;
+
 alter table public.team_members add column if not exists status_message text not null default '';
 alter table public.office_layouts add column if not exists canvas_width integer not null default 1000;
 alter table public.office_layouts add column if not exists canvas_height integer not null default 560;
@@ -17,7 +26,8 @@ begin
     alter table public.office_layouts add constraint office_layouts_canvas_size_check
       check (canvas_width between 1000 and 2400 and canvas_height between 560 and 1200);
   end if;
-  if not exists (select 1 from pg_constraint where conrelid = 'public.office_layouts'::regclass and conname = 'office_layouts_room_key_key') then
+  -- After schema-teams.sql, room keys are unique per team instead of globally.
+  if not exists (select 1 from pg_constraint where conrelid = 'public.office_layouts'::regclass and conname = 'office_layouts_room_key_key') and to_regclass('public.office_layouts_team_room_key_idx') is null then
     alter table public.office_layouts add constraint office_layouts_room_key_key unique (room_key);
   end if;
   if not exists (select 1 from pg_constraint where conrelid = 'public.office_layouts'::regclass and conname = 'office_layouts_room_kind_check') then
@@ -114,12 +124,12 @@ begin
     ) order by seat) into room_items from generate_series(1, 4) as seats(seat);
     insert into public.office_layouts(name, theme, items, canvas_width, canvas_height, room_key, room_kind)
       values ('사무실 ' || room_number, 'sage', room_items, 1600, 900, 'office-' || room_number, 'office')
-      on conflict (room_key) do nothing;
+      on conflict do nothing;
   end loop;
   insert into public.office_layouts(name, theme, items, canvas_width, canvas_height, room_key, room_kind) values
     ('야외 마당', 'sage', '[{"id":"yard-tree-1","kind":"plant","x":250,"y":780,"rotation":0,"label":"쉼터 나무","member_id":null},{"id":"yard-tree-2","kind":"plant","x":1900,"y":780,"rotation":0,"label":"마당 나무","member_id":null},{"id":"yard-bench","kind":"sofa","x":1120,"y":820,"rotation":0,"label":"벤치","member_id":null}]', 2200, 1100, 'outdoor', 'outdoor'),
     ('카페', 'sand', '[{"id":"cafe-table-1","kind":"table","x":420,"y":330,"rotation":0,"label":"커피 테이블","member_id":null},{"id":"cafe-table-2","kind":"table","x":1100,"y":330,"rotation":0,"label":"커피 테이블","member_id":null},{"id":"cafe-sofa","kind":"sofa","x":420,"y":650,"rotation":0,"label":"쉬어 가는 자리","member_id":null},{"id":"cafe-plant","kind":"plant","x":1370,"y":640,"rotation":0,"label":"카페 식물","member_id":null}]', 1600, 900, 'cafe', 'cafe')
-    on conflict (room_key) do nothing;
+    on conflict do nothing;
 end;
 $$;
 

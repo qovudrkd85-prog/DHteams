@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
+  Lock,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -37,6 +38,7 @@ import {
   setDepartmentEventDeleted,
   type DepartmentEvent,
   type DepartmentEventInput,
+  type EventVisibility,
   type EventCategory,
 } from "@/lib/department-events";
 
@@ -95,6 +97,7 @@ export function DepartmentCalendar({
   const [events, setEvents] = useState<DepartmentEvent[]>([]);
   const [filter, setFilter] = useState<EventCategory | "all">("all");
   const [creatorFilter, setCreatorFilter] = useState("all");
+  const [scopeFilter, setScopeFilter] = useState<"all" | EventVisibility>("all");
   const [editor, setEditor] = useState<Editor | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -157,6 +160,7 @@ export function DepartmentCalendar({
   const visible = currentEvents.filter(
     (e) =>
       (filter === "all" || e.category === filter) &&
+      (scopeFilter === "all" || (e.visibility ?? "team") === scopeFilter) &&
       (activeCreatorFilter === "all" ||
         (activeCreatorFilter === "mine"
           ? e.created_by === currentMember?.id
@@ -185,6 +189,7 @@ export function DepartmentCalendar({
     setEditor({
       input: {
         title: "",
+        visibility: scopeFilter === "private" ? "private" : "team",
         category: filter === "all" ? "work" : filter,
         starts_on: day,
         ends_on: day,
@@ -200,6 +205,7 @@ export function DepartmentCalendar({
     setConfirmDelete(false);
     const {
       title,
+      visibility,
       category,
       starts_on,
       ends_on,
@@ -212,6 +218,7 @@ export function DepartmentCalendar({
       original: event,
       input: {
         title,
+        visibility: visibility ?? "team",
         category,
         starts_on,
         ends_on,
@@ -264,7 +271,7 @@ export function DepartmentCalendar({
         setMonth(new Date(`${saved.starts_on}T12:00:00`));
       setEditor(null);
       toast.success(
-        original ? "일정을 수정했습니다." : "부서 일정을 등록했습니다.",
+        original ? "일정을 수정했습니다." : saved.visibility === "private" ? "내 개인 일정을 등록했습니다." : "팀 일정을 등록했습니다.",
       );
       void reload();
     } catch (err) {
@@ -419,6 +426,19 @@ export function DepartmentCalendar({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 sm:px-6">
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-lg bg-slate-100 p-0.5" role="group" aria-label="일정 보기 범위">
+            {([["all", "모든 일정"], ["team", "팀 일정"], ["private", "내 개인 일정"]] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={scopeFilter === key}
+                onClick={() => setScopeFilter(key)}
+                className={cn("rounded-md px-2.5 py-1 text-xs text-slate-500", scopeFilter === key && "bg-white text-teal-800 shadow-sm")}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <Label htmlFor="event-creator-filter" className="text-xs text-slate-500">
             등록자
           </Label>
@@ -439,13 +459,14 @@ export function DepartmentCalendar({
             ))}
             <option value="unassigned">등록자 미지정</option>
           </select>
-          {(filter !== "all" || activeCreatorFilter !== "all") && (
+          {(filter !== "all" || activeCreatorFilter !== "all" || scopeFilter !== "all") && (
             <button
               type="button"
               className="text-xs text-teal-700 hover:underline"
               onClick={() => {
                 setFilter("all");
                 setCreatorFilter("all");
+                setScopeFilter("all");
               }}
             >
               필터 초기화
@@ -560,9 +581,14 @@ export function DepartmentCalendar({
                     className={cn(
                       "block w-full truncate rounded border-l-2 px-1.5 py-1 text-left text-[11px]",
                       EVENT_CATEGORIES[item.category].className,
+                      item.visibility === "private" && "border border-dashed",
                     )}
+                    data-visibility={item.visibility ?? "team"}
                   >
                     <span className="block truncate">
+                      {item.visibility === "private" && (
+                        <Lock className="mr-0.5 inline size-2.5" aria-label="나만 보기" />
+                      )}
                       {item.starts_at && (
                         <span className="mr-1 opacity-70">
                           {item.starts_at.slice(0, 5)}
@@ -648,7 +674,11 @@ export function DepartmentCalendar({
                 type="button"
                 key={item.id}
                 onClick={() => edit(item)}
-                className="flex w-full items-start gap-3 rounded-xl border border-slate-100 p-3 text-left transition-colors hover:bg-slate-50"
+                className={cn(
+                  "flex w-full items-start gap-3 rounded-xl border border-slate-100 p-3 text-left transition-colors hover:bg-slate-50",
+                  item.visibility === "private" && "border-dashed border-slate-300 bg-slate-50/60",
+                )}
+                data-visibility={item.visibility ?? "team"}
               >
                 <span
                   className={cn(
@@ -660,6 +690,11 @@ export function DepartmentCalendar({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="break-words text-sm font-medium text-slate-800">
+                    {item.visibility === "private" && (
+                      <span className="mr-1.5 inline-flex items-center gap-0.5 rounded bg-slate-200 px-1.5 py-0.5 align-middle text-[10px] font-normal text-slate-600">
+                        <Lock className="size-2.5" />나만 보기
+                      </span>
+                    )}
                     {item.title}
                   </p>
                   <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
@@ -737,6 +772,29 @@ export function DepartmentCalendar({
                     : "현재 선택한 내 프로필로 등록합니다."}
                 </p>
               </div>
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium">공개 범위</legend>
+                <div className="flex rounded-lg bg-slate-100 p-1">
+                  {([["team", "팀 일정"], ["private", "나만 보기"]] as const).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-pressed={(editor?.input.visibility ?? "team") === key}
+                      disabled={Boolean(editor?.original && editor.original.created_by !== currentMember?.id)}
+                      onClick={() => patch({ visibility: key })}
+                      className={cn("flex flex-1 items-center justify-center gap-1 rounded-md py-1.5 text-sm text-slate-500", (editor?.input.visibility ?? "team") === key && "bg-white text-teal-800 shadow-sm")}
+                    >
+                      {key === "private" ? <Lock className="size-3.5" /> : <Users className="size-3.5" />}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  {(editor?.input.visibility ?? "team") === "private"
+                    ? "나에게만 보입니다. 팀을 옮겨도 내 일정으로 남습니다."
+                    : "같은 팀원 모두 보고 수정할 수 있습니다."}
+                </p>
+              </fieldset>
               <div className="space-y-2">
                 <Label htmlFor="event-title">일정명</Label>
                 <Input

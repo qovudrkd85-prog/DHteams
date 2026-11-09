@@ -3,7 +3,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const sources = ["schema-team-workspace.sql", "schema-accounts.sql", "schema-office-presence.sql"];
-const content = new Map(sources.map((name) => {
+const teamSources = ["schema-teams.sql"];
+const content = new Map([...sources, ...teamSources].map((name) => {
   const sql = fs.readFileSync(path.join(root, "supabase", name), "utf8");
   if ((sql.match(/^begin;\s*$/gm) || []).length !== 1 || (sql.match(/^commit;\s*$/gm) || []).length !== 1) {
     throw new Error(`Expected one outer transaction in ${name}. Review before generating.`);
@@ -24,6 +25,12 @@ const bundles = [
     description: "office world upgrade for an account-enabled installation",
     prerequisite: "The team workspace and account migrations must already be installed.",
     sources: ["schema-office-presence.sql"],
+  },
+  {
+    name: "teams-multi-team-upgrade.sql",
+    description: "team spaces (invite codes) + private schedules upgrade",
+    prerequisite: "Office presence must already be installed. Re-run this LAST after any other DH Teams SQL.",
+    sources: teamSources,
   },
 ];
 for (const bundle of bundles) {

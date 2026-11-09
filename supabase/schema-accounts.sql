@@ -4,6 +4,15 @@
 -- 재실행 가능하며 비밀번호는 Supabase Auth에서만 관리합니다.
 begin;
 
+-- Re-running this file after schema-teams.sql would reopen cross-team access. Stop instead.
+do $$
+begin
+  if to_regclass('public.teams') is not null then
+    raise exception '팀 공간(schema-teams.sql)이 설치된 DB입니다. 이 파일만 다시 실행하면 팀 격리가 풀립니다. 실행을 중단했습니다.' using errcode = 'P0001';
+  end if;
+end;
+$$;
+
 alter table public.team_members add column if not exists user_id uuid;
 alter table public.team_members add column if not exists username text;
 alter table public.team_members add column if not exists profile_completed boolean not null default false;

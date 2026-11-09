@@ -1,9 +1,18 @@
 import type { TeamMember } from "@/lib/team/workspace";
 
+export interface TeamSpace {
+  id: string;
+  name: string;
+  invite_code: string;
+  is_owner: boolean;
+  can_rotate_code: boolean;
+}
+
 export interface AccountIdentity {
   id: string;
   username: string;
   member: TeamMember;
+  team: TeamSpace | null;
 }
 
 export type Account = AccountIdentity;

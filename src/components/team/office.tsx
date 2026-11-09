@@ -19,6 +19,7 @@ import { roomPortals } from "@/lib/team/world";
 import { WalkingCharacter, StatusBubble } from "./character";
 import { WorldArt, WorldPortals } from "./world-art";
 import styles from "./office.module.css";
+import { HealingOverlay } from "./healing/healing-overlay";
 
 type Draft = OfficeDraft;
 type Props = {
@@ -188,6 +189,7 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<{ pointer: number; item: OfficeItem; x: number; y: number } | null>(null);
   const [layouts, setLayouts] = useState<OfficeLayout[]>([]);
+  const [healingOpen, setHealingOpen] = useState(false);
   const [original, setOriginal] = useState<OfficeLayout | null>(null);
   const [draft, setDraft] = useState<Draft>(starter);
   const [loading, setLoading] = useState(true);
@@ -591,7 +593,7 @@ export function TeamOffice({ members, attendance, currentMember, loading: member
             <div className={styles.sceneFooter}><span><i className={styles.onlineDot} /> 근무 중 <i className={styles.offlineDot} /> 미출근·퇴근</span><span>{editing ? "가구 선택 후 방향키 이동 · Shift 빠르게 · R 회전" : "바닥 클릭 후 방향키 / WASD · 문 앞에서 E · 지도를 끌어 둘러보기"}</span></div>
             {!editing && <div className={styles.gameControls}>
               <div><strong>{game.player?.motion === "seated" ? "내 자리에서 쉬어 가요" : nearPortal ? `${nearPortal.destination.name} 입구` : "오늘은 어디서 일할까요?"}</strong><p>{game.player?.motion === "seated" ? "일어나 걸어도 자리 예약은 유지돼요." : "빈 책상을 누르면 내 자리로 선택할 수 있어요."}</p></div>
-              <div className={styles.gameActions}>{nearPortal && <button type="button" className={styles.primaryButton} disabled={busy} onClick={() => travel(nearPortal.destination.id)}>들어가기 · E</button>}{game.player?.motion === "seated" && <button type="button" className={styles.primaryButton} onClick={() => { game.stand(); viewportRef.current?.focus({ preventScroll: true }); }}>일어나기</button>}</div>
+              <div className={styles.gameActions}>{nearPortal && <button type="button" className={styles.primaryButton} disabled={busy} onClick={() => travel(nearPortal.destination.id)}>들어가기 · E</button>}{game.player?.motion === "seated" && <button type="button" className={styles.primaryButton} onClick={() => { game.stand(); viewportRef.current?.focus({ preventScroll: true }); }}>일어나기</button>}{game.player?.motion === "seated" && <button type="button" className={styles.quietButton} data-testid="healing-open" onClick={() => setHealingOpen(true)}>🌊 힐링 타임</button>}</div>{healingOpen && <HealingOverlay onClose={() => { setHealingOpen(false); viewportRef.current?.focus({ preventScroll: true }); }} />}
               <div className={styles.directionPad} aria-label="캐릭터 이동 버튼">{([["up", "위", ArrowUp], ["left", "왼쪽", ArrowLeft], ["down", "아래", ArrowDown], ["right", "오른쪽", ArrowRight]] as const).map(([direction, label, Icon]) => <button key={direction} type="button" aria-label={`캐릭터 ${label}${direction === "left" || direction === "right" ? "으로" : "로"} 이동`} disabled={busy || !game.player} onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); game.startDirection(direction); }} onPointerUp={game.stopMovement} onPointerCancel={game.stopMovement} onLostPointerCapture={game.stopMovement} onKeyDown={(event) => { if (event.key === " " || event.key === "Enter") { event.preventDefault(); game.startDirection(direction); } }} onKeyUp={game.stopMovement} onBlur={game.stopMovement}><Icon size={18} /></button>)}</div>
             </div>}
           </div>

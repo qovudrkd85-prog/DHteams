@@ -8,8 +8,8 @@ const scriptSrc = isDev
   : "script-src 'self' 'unsafe-inline'";
 
 const connectSrc = isDev
-  ? "connect-src 'self' ws://localhost:* http://localhost:* https://*.supabase.co wss://*.supabase.co"
-  : "connect-src 'self' https://*.supabase.co wss://*.supabase.co";
+  ? "connect-src 'self' ws://localhost:* http://localhost:* https://*.supabase.co wss://*.supabase.co https://api.open-meteo.com"
+  : "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.open-meteo.com";
 
 const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },

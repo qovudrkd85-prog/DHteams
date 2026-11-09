@@ -1,0 +1,14 @@
+.effects { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.drop, .flake { position: absolute; top: -10%; display: block; }
+.drop { width: 1px; height: 18vh; background: linear-gradient(to bottom, transparent, rgb(255 255 255 / 0.55)); animation: fall linear infinite; }
+.flake { width: 6px; height: 6px; border-radius: 9999px; background: rgb(255 255 255 / 0.85); filter: blur(0.5px); animation: drift linear infinite; }
+.fog { position: absolute; inset: -20%; background: radial-gradient(ellipse at center, rgb(255 255 255 / 0.28), transparent 70%); animation: breathe 9s ease-in-out infinite alternate; }
+.vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgb(0 0 0 / 0.45)); }
+
+@keyframes fall { to { transform: translate3d(-6vw, 125vh, 0); } }
+@keyframes drift { 50% { transform: translate3d(3vw, 60vh, 0); } to { transform: translate3d(-2vw, 120vh, 0); } }
+@keyframes breathe { from { opacity: 0.4; transform: translateX(-3%); } to { opacity: 0.85; transform: translateX(3%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .drop, .flake, .fog { animation: none; opacity: 0.35; }
+}

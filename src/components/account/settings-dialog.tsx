@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { validatePassword, type Account, type ProfileInput } from "@/lib/account/types";
 import { MEMBER_AVATARS, MEMBER_COLORS } from "@/lib/team/workspace";
 import { cn } from "@/lib/utils";
+import { TeamSettings } from "./team-settings";
 
 export function AccountSettingsDialog() {
   const { account, settingsOpen } = useAccount();
@@ -27,7 +28,7 @@ function SettingsForm({ account }: { account: Account }) {
     avatar: account.member.avatar || MEMBER_AVATARS[0],
     color: account.member.color || MEMBER_COLORS[0],
   }));
-  const [tab, setTab] = useState<"profile" | "password">("profile");
+  const [tab, setTab] = useState<"profile" | "team" | "password">("profile");
   const [currentPassword, setCurrentPassword] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
@@ -91,9 +92,9 @@ function SettingsForm({ account }: { account: Account }) {
         </DialogHeader>
         <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">아이디 <span className="ml-2 font-semibold text-slate-700">{account.username}</span></div>
         {!required && <div className="flex rounded-lg bg-slate-100 p-1" aria-label="내 설정 메뉴">
-          {(["profile", "password"] as const).map((item) => <button type="button" key={item} disabled={busy} aria-pressed={tab === item} onClick={() => { setTab(item); setError(null); setCurrentPassword(""); setPassword(""); setPasswordConfirm(""); }} className={cn("flex-1 rounded-md py-2 text-sm text-slate-500", tab === item && "bg-white text-teal-800 shadow-sm")}>{item === "profile" ? "프로필" : "비밀번호 변경"}</button>)}
+          {(account.team ? ["profile", "team", "password"] as const : ["profile", "password"] as const).map((item) => <button type="button" key={item} disabled={busy} aria-pressed={tab === item} onClick={() => { setTab(item); setError(null); setCurrentPassword(""); setPassword(""); setPasswordConfirm(""); }} className={cn("flex-1 rounded-md py-2 text-sm text-slate-500", tab === item && "bg-white text-teal-800 shadow-sm")}>{item === "profile" ? "프로필" : item === "team" ? "팀" : "비밀번호 변경"}</button>)}
         </div>}
-        {tab === "profile" ? <form onSubmit={saveProfile}>
+        {tab === "team" && account.team ? <TeamSettings team={account.team} busy={busy} setBusy={setBusy} /> : tab === "profile" ? <form onSubmit={saveProfile}>
           <fieldset disabled={busy} className="space-y-4 pb-5">
             <div className="flex items-center gap-3 rounded-xl bg-[#f1f6f1] p-3"><span className="flex size-14 shrink-0 items-center justify-center rounded-2xl border-2 bg-white text-3xl" style={{ borderColor: form.color }}>{form.avatar}</span><div className="min-w-0"><p className="truncate text-sm font-semibold">{form.name.trim() || "나의 캐릭터"}</p><p className="mt-1 truncate text-xs text-slate-500">{form.role.trim() || "함께 일하는 우리 팀"}</p></div></div>
             <div className="space-y-2"><Label htmlFor="profile-name">이름</Label><Input id="profile-name" name="name" autoComplete="name" required maxLength={40} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="예) 김민수" /></div>

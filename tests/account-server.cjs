@@ -28,7 +28,7 @@ async function freePort() {
 }
 
 async function fakeSupabase() {
-  const state = { calls: [], accounts: new Map(), tokens: new Map(), refreshTokens: new Map(), ready: true, confirmEmail: false, seatConflict: false };
+  const state = { calls: [], accounts: new Map(), tokens: new Map(), refreshTokens: new Map(), ready: true, confirmEmail: false, seatConflict: false, teams: new Map(), teamRpcError: null };
   const addAccount = (username) => {
     const id = randomUUID();
     const email = `${username}@members.dhteams.invalid`;
@@ -68,6 +68,34 @@ async function fakeSupabase() {
         if (!account) return send(401, { message: "Missing authenticated user token" });
         if (state.seatConflict) return send(409, { code: "23505", message: "다른 팀원이 이미 선택한 자리입니다." });
         return send(200, { id: body.p_layout_id, name: "1번 사무실", theme: "sage", items: [{ id: "own-desk", kind: "desk", x: 250, y: 200, rotation: 0, label: "", member_id: body.p_item_id ? account.member.id : null }], updated_at: new Date().toISOString() });
+      }
+      if (url.pathname.startsWith("/rest/v1/rpc/") && ["create_team", "join_team", "leave_team", "regenerate_team_code"].includes(url.pathname.slice(13))) {
+        if (!account) return send(401, { message: "Missing authenticated user token" });
+        if (state.teamRpcError) return send(400, state.teamRpcError);
+        const rpcName = url.pathname.slice(13);
+        if (rpcName === "create_team") {
+          const team = { id: randomUUID(), name: body.p_name, invite_code: "K7QM3XPA", created_by: account.member.id };
+          state.teams.set(team.id, team);
+          account.member.team_id = team.id;
+          return send(200, team);
+        }
+        if (rpcName === "join_team") {
+          const team = [...state.teams.values()].find((candidate) => candidate.invite_code === body.p_code);
+          if (!team) return send(404, { code: "P0002", message: "초대코드에 맞는 팀이 없습니다." });
+          account.member.team_id = team.id;
+          return send(200, team);
+        }
+        if (rpcName === "leave_team") { account.member.team_id = null; return send(204); }
+        const team = state.teams.get(account.member.team_id);
+        team.invite_code = "N4RT8WZB";
+        return send(200, team);
+      }
+      if (url.pathname === "/rest/v1/teams") {
+        if (!account) return send(401, { message: "Missing authenticated user token" });
+        const filter = url.searchParams.get("id");
+        const teams = [...state.teams.values()].filter((team) => filter === `eq.${team.id}` && team.id === account.member.team_id);
+        if (String(request.headers.accept).includes("application/vnd.pgrst.object+json")) return teams.length === 1 ? send(200, teams[0]) : send(406, { code: "PGRST116", message: "No row" });
+        return send(200, teams);
       }
       if (url.pathname === "/auth/v1/signup") {
         if (state.accounts.has(body.email)) return send(422, { code: "user_already_exists", msg: "User already registered" });
@@ -280,6 +308,38 @@ function client(baseURL) {
     assert.equal((await browser.request("/api/office/seat", { method: "POST", body: seatBody })).status, 409);
     upstream.state.seatConflict = false;
     assert.equal((await browser.request("/api/office/seat", { method: "POST", body: { ...seatBody, itemId: null } })).data.layout.items[0].member_id, null);
+
+    // Team spaces: input validation, RPC mapping, session payload carries the team.
+    assert.equal((await browser.request("/api/team", { method: "POST", origin: "https://untrusted.example", body: { action: "create", name: "A팀" } })).status, 403);
+    assert.equal((await browser.request("/api/team", { method: "POST", body: { action: "explode" } })).status, 400);
+    assert.equal((await browser.request("/api/team", { method: "POST", body: { action: "create", name: "   " } })).status, 400);
+    assert.equal((await browser.request("/api/team", { method: "POST", body: { action: "join", code: "O0O0" } })).status, 400);
+    const created = await browser.request("/api/team", { method: "POST", body: { action: "create", name: " A팀 " } });
+    assert.equal(created.status, 200, JSON.stringify(created.data));
+    assert.deepEqual(created.data.account.team, { id: alice.member.team_id, name: "A팀", invite_code: "K7QM3XPA", is_owner: true, can_rotate_code: true });
+    assert.deepEqual(upstream.state.calls.findLast((call) => call.path === "/rest/v1/rpc/create_team").body, { p_name: "A팀" });
+    const rotated = await browser.request("/api/team", { method: "POST", body: { action: "regenerate" } });
+    assert.equal(rotated.data.account.team.invite_code, "N4RT8WZB");
+    assert.equal((await browser.request("/api/session")).data.account.team.name, "A팀");
+    const left = await browser.request("/api/team", { method: "POST", body: { action: "leave" } });
+    assert.equal(left.status, 200);
+    assert.equal(left.data.account.team, null);
+    assert.equal((await browser.request("/api/team", { method: "POST", body: { action: "join", code: "zzzz-zzzz" } })).status, 404);
+    const joined = await browser.request("/api/team", { method: "POST", body: { action: "join", code: " n4rt-8wzb " } });
+    assert.equal(joined.status, 200, JSON.stringify(joined.data));
+    assert.deepEqual(upstream.state.calls.findLast((call) => call.path === "/rest/v1/rpc/join_team").body, { p_code: "N4RT8WZB" });
+    assert.equal(joined.data.account.team.is_owner, true);
+    upstream.state.teamRpcError = { code: "23514", message: "이미 팀에 소속되어 있습니다." };
+    const already = await browser.request("/api/team", { method: "POST", body: { action: "create", name: "B팀" } });
+    assert.equal(already.status, 400);
+    assert.equal(already.data.error, "이미 팀에 소속되어 있습니다.");
+    upstream.state.teamRpcError = { code: "PGRST202", message: "Function not found" };
+    assert.equal((await browser.request("/api/team", { method: "POST", body: { action: "leave" } })).status, 503);
+    upstream.state.teamRpcError = { code: "XX000", message: "internal detail must not leak" };
+    const hidden = await browser.request("/api/team", { method: "POST", body: { action: "leave" } });
+    assert.equal(hidden.status, 503);
+    assert.doesNotMatch(hidden.data.error, /internal detail/);
+    upstream.state.teamRpcError = null;
 
     const proxy = await browser.request("/api/db/rest/v1/projects?select=*", { headers: { Authorization: "Bearer spoofed-user-token", apikey: "spoofed-key" } });
     assert.equal(proxy.status, 200);

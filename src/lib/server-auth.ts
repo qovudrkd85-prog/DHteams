@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import type { AccountIdentity, ProfileInput, SessionPayload } from "@/lib/account/types";
+import type { AccountIdentity, ProfileInput, SessionPayload, TeamSpace } from "@/lib/account/types";
 import type { TeamMember } from "@/lib/team/workspace";
 
 export const SESSION_COOKIE = "teams_sid";
@@ -122,9 +122,27 @@ export function createAuthContext(request: NextRequest) {
       clearSessionCookies();
       throw new AccountError("로그인이 만료되었습니다. 다시 로그인해 주세요.", 401);
     }
-    const { data: member, error: profileError } = await supabase.from("team_members").select("id,user_id,username,name,role,avatar,color,status_message,profile_completed,created_at").eq("user_id", data.user.id).maybeSingle();
-    if (profileError || !member?.username) throw new AccountError("계정 프로필을 불러오지 못했습니다. 계정 SQL 설치 상태를 확인해 주세요.", 503);
-    return { id: data.user.id, username: member.username, member: member as TeamMember };
+    const { data: member, error: profileError } = await supabase.from("team_members").select("id,user_id,username,name,role,avatar,color,status_message,profile_completed,created_at,team_id").eq("user_id", data.user.id).maybeSingle();
+    if (profileError || !member?.username) throw new AccountError("계정 프로필을 불러오지 못했습니다. 계정·팀 SQL 설치 상태를 확인해 주세요.", 503);
+    let team: TeamSpace | null = null;
+    if (member.team_id) {
+      const { data: row, error: teamError } = await supabase.from("teams").select("id,name,invite_code,created_by").eq("id", member.team_id).maybeSingle();
+      if (teamError) throw new AccountError("팀 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
+      if (row) {
+        const isOwner = row.created_by === member.id;
+        let canRotate = isOwner;
+        if (!isOwner) {
+          // Mirrors regenerate_team_code(): anyone may rotate once the creator has left the team.
+          const { data: creator, error: creatorError } = row.created_by
+            ? await supabase.from("team_members").select("id").eq("id", row.created_by).eq("team_id", row.id).maybeSingle()
+            : { data: null, error: null };
+          if (creatorError) throw new AccountError("팀 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
+          canRotate = !creator;
+        }
+        team = { id: row.id, name: row.name, invite_code: row.invite_code, is_owner: isOwner, can_rotate_code: canRotate };
+      }
+    }
+    return { id: data.user.id, username: member.username, member: member as TeamMember, team };
   };
   return { supabase, config, getAccount, applyCookies, clearSessionCookies };
 }
