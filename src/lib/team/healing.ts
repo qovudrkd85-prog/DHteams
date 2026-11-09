@@ -43,6 +43,50 @@ export function activitiesFor(sceneId: HealingSceneId): readonly HealingActivity
   return HEALING_ACTIVITIES.filter((a) => !a.scenes || a.scenes.includes(sceneId));
 }
 
+export const HEALING_STATUS = "힐링 타임 중 · 잠시 쉬어요";
+
+type StatusWriter = (message: string) => Promise<{ status_message?: string | null }>;
+
+export interface HealingStatusSession {
+  /** Resolves true once our HEALING_STATUS write landed. */
+  applied: Promise<boolean>;
+  /** Message to restore on leave. */
+  original: string;
+  isApplied: () => boolean;
+  /** Restores the original; resolves false when nothing was ours to undo. Rejects if the restore write fails. */
+  end: () => Promise<boolean>;
+}
+
+// One restore in flight at a time; a quick reopen waits for it and inherits its target.
+let pendingRestore: { done: Promise<unknown>; original: string } | null = null;
+
+/** Shows teammates I am resting, ordered after any unfinished restore from the last session. */
+export function startHealingStatus(current: string, write: StatusWriter): HealingStatusSession {
+  const prior = pendingRestore;
+  // Leftover HEALING_STATUS with no restore pending = interrupted session: clear it on leave.
+  const original = prior ? prior.original : current === HEALING_STATUS ? "" : current;
+  const alreadyHealing = !prior && current === HEALING_STATUS;
+  let landed = false;
+  const applied = (prior?.done ?? Promise.resolve())
+    .then(() => alreadyHealing
+      ? true
+      : write(HEALING_STATUS).then((member) => member.status_message === HEALING_STATUS, () => false))
+    .then((ok) => { landed = ok; return ok; });
+  return {
+    applied,
+    original,
+    isApplied: () => landed,
+    end() {
+      // Never undo a write that did not land.
+      const done = applied.then((ok) => (ok ? write(original).then(() => true) : false));
+      const entry = { done: done.catch(() => undefined), original };
+      pendingRestore = entry;
+      void entry.done.then(() => { if (pendingRestore === entry) pendingRestore = null; });
+      return done;
+    },
+  };
+}
+
 export const HEALING_MINUTES = [5, 10, 15] as const;
 export type HealingMinutes = (typeof HEALING_MINUTES)[number];
 

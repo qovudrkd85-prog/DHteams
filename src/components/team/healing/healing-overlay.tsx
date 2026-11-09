@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useAccount } from "@/components/account/provider";
 import {
   fetchCurrentWeather, findCity, findScene, formatRemaining, HEALING_CITIES, HEALING_MINUTES, HEALING_SCENES,
-  loadHealingPrefs, saveHealingPrefs, sceneForWeather,
+  loadHealingPrefs, saveHealingPrefs, sceneForWeather, startHealingStatus,
   type CurrentWeather, type HealingMinutes, type HealingSceneId, type HealingPrefs, type WeatherEffect,
 } from "@/lib/team/healing";
 import { cn } from "@/lib/utils";
@@ -20,8 +20,6 @@ interface HealingOverlayProps {
   /** Extra controls shown above the scene chips, given the current scene. */
   children?: (sceneId: HealingSceneId) => ReactNode;
 }
-
-const HEALING_STATUS = "힐링 타임 중 · 잠시 쉬어요";
 
 // Fire-and-forget restore that survives tab close/refresh.
 function restoreOnUnload(statusMessage: string): void {
@@ -127,22 +125,12 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
 
   // Show teammates I am resting; restore the previous message when I leave. Failures never block the view.
   useEffect(() => {
-    // A leftover message from an interrupted session is cleared instead of restored.
-    const original = statusAtOpen.current === HEALING_STATUS ? "" : statusAtOpen.current;
-    const applied = statusAtOpen.current === HEALING_STATUS
-      ? Promise.resolve(true)
-      : updateStatus(HEALING_STATUS).then((member) => member.status_message === HEALING_STATUS, () => false);
-    let landed = false;
-    void applied.then((ok) => { landed = ok; });
-    const onPageHide = () => { if (landed) restoreOnUnload(original); };
+    const session = startHealingStatus(statusAtOpen.current, updateStatus);
+    const onPageHide = () => { if (session.isApplied()) restoreOnUnload(session.original); };
     window.addEventListener("pagehide", onPageHide);
     return () => {
       window.removeEventListener("pagehide", onPageHide);
-      void applied.then((ok) => {
-        // Restore only after our own write landed; never undo a failed write.
-        if (!ok) return;
-        return updateStatus(original).then(() => undefined, () => { toast.error("상태 메시지를 되돌리지 못했어요. 내 설정에서 바꿔 주세요."); });
-      });
+      session.end().catch(() => { toast.error("상태 메시지를 되돌리지 못했어요. 내 설정에서 바꿔 주세요."); });
     };
     // Run once per open; account changes during the session must not re-trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -167,6 +155,8 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
       />
       <WeatherEffects effect={weather?.effect ?? "clear"} />
       <div className={styles.vignette} />
+      {/* Blurred still of the same photo while the 360 view loads, instead of a black box. */}
+      {imageState === "loading" && <div aria-hidden className="pointer-events-none absolute inset-0 scale-110 bg-cover bg-center opacity-80 blur-md" style={{ backgroundImage: `url(${scene.image})` }} data-testid="healing-preview" />}
       {imageState === "loading" && <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-sm text-white/80"><LoaderCircle className="size-4 animate-spin" />풍경을 불러오는 중…</div>}
       {imageState === "error" && <div role="alert" className="absolute inset-x-0 top-1/2 mx-auto w-fit rounded-lg bg-black/60 px-4 py-2 text-sm">풍경 사진을 불러오지 못했어요. 다른 장소를 골라 주세요.</div>}
 

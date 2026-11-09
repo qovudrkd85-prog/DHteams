@@ -53,3 +53,38 @@ for (const scene of h.HEALING_SCENES) {
   assert.ok(ids.includes("laptop") && ids.includes("rest"), scene.id);
 }
 console.log("PASS: healing weather mapping, scene suggestion, timer text, weather parsing, bundled panoramas, safe preferences, activities.");
+
+// Status session: closing then reopening fast must keep the real original message.
+(async () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  let server = "회의 중";
+  let failNext = false;
+  const write = (msg) => new Promise((resolve, reject) => setTimeout(() => {
+    if (failNext) { failNext = false; reject(new Error("이전 요청이 끝난 후 다시 시도해 주세요.")); return; }
+    server = msg; resolve({ status_message: msg });
+  }, 5));
+  const s1 = h.startHealingStatus(server, write);
+  assert.equal(await s1.applied, true);
+  assert.equal(server, h.HEALING_STATUS);
+  const end1 = s1.end(); // restore still in flight
+  const s2 = h.startHealingStatus(server, write); // stale view still says HEALING_STATUS
+  assert.equal(s2.original, "회의 중");
+  await end1;
+  assert.equal(await s2.applied, true);
+  assert.equal(server, h.HEALING_STATUS, "reopen must apply after the old restore, not before");
+  await s2.end(); await tick();
+  assert.equal(server, "회의 중");
+  // Leftover message from a crashed session is cleared, not restored.
+  const s3 = h.startHealingStatus(h.HEALING_STATUS, write);
+  await s3.applied; await s3.end(); await tick();
+  assert.equal(server, "");
+  // A failed write is never undone.
+  server = "외근";
+  failNext = true;
+  const s4 = h.startHealingStatus(server, write);
+  assert.equal(await s4.applied, false);
+  assert.equal(s4.isApplied(), false);
+  assert.equal(await s4.end(), false);
+  assert.equal(server, "외근");
+  console.log("PASS: healing status session survives quick reopen, clears leftovers, never undoes failed writes.");
+})().catch((error) => { console.error(error); process.exit(1); });

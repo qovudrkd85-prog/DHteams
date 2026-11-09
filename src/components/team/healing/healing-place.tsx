@@ -24,8 +24,9 @@ function ActivityBar({ sceneId, activity, onPick, member }: ActivityBarProps) {
   const current = allowed.some((a) => a.id === activity) ? activity : "rest";
   const label = allowed.find((a) => a.id === current)?.name ?? "쉬기";
   return (
-    <div className="flex flex-wrap items-end gap-4">
-      <div className="flex flex-col items-center gap-1" data-testid="healing-avatar" data-activity={current}>
+    <div className="flex w-fit max-w-full flex-wrap items-end gap-4 rounded-2xl bg-black/35 p-3 backdrop-blur-md">
+      <div className="relative flex flex-col items-center gap-1" data-testid="healing-avatar" data-activity={current}>
+        <span aria-hidden className={cn("absolute -right-2 top-0 z-10 text-2xl drop-shadow", styles.prop)}>{allowed.find((a) => a.id === current)?.emoji}</span>
         <span
           className={cn("flex size-16 items-center justify-center rounded-full border-4 bg-white text-4xl shadow-lg", styles.avatar)}
           style={{ borderColor: member?.color ?? "#ffffff" }}
@@ -33,6 +34,7 @@ function ActivityBar({ sceneId, activity, onPick, member }: ActivityBarProps) {
         >
           {member?.avatar ?? "🙂"}
         </span>
+        <span aria-hidden className="-mt-2 h-2 w-12 rounded-full bg-black/40 blur-[2px]" />
         <span className="rounded-full bg-black/50 px-2 py-0.5 text-xs">{member?.name ?? "나"} · {label}</span>
       </div>
       <div className="flex flex-wrap gap-2" role="group" aria-label="할 일 고르기">
