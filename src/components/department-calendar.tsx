@@ -175,6 +175,7 @@ export function DepartmentCalendar({
   const dayEvents = visible.filter((e) => occursOn(e, selected));
   const monthCount = currentEvents.filter(
     (e) =>
+      (!fixedScope || (e.visibility ?? "team") === fixedScope) &&
       e.starts_on.slice(0, 7) <= monthKey && e.ends_on.slice(0, 7) >= monthKey,
   ).length;
   const today = dateKey(new Date());
@@ -261,6 +262,8 @@ export function DepartmentCalendar({
       const saved = await saveDepartmentEvent(
         {
           ...input,
+          // A fixed-scope calendar never saves outside its scope.
+          visibility: fixedScope ?? input.visibility,
           title: input.title.trim(),
           location: input.location?.trim() || null,
           organizer: input.organizer?.trim() || null,
@@ -779,7 +782,7 @@ export function DepartmentCalendar({
               <fieldset className="space-y-2">
                 <legend className="text-sm font-medium">공개 범위</legend>
                 <div className="flex rounded-lg bg-slate-100 p-1">
-                  {([["team", "팀 일정"], ["private", "나만 보기"]] as const).map(([key, label]) => (
+                  {([["team", "팀 일정"], ["private", "나만 보기"]] as const).filter(([key]) => !fixedScope || key === fixedScope).map(([key, label]) => (
                     <button
                       key={key}
                       type="button"
