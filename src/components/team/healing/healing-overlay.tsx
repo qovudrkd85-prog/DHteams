@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CloudSun, LoaderCircle, X } from "lucide-react";
 import { toast } from "sonner";
 import { useAccount } from "@/components/account/provider";
 import {
   fetchCurrentWeather, findCity, findScene, formatRemaining, HEALING_CITIES, HEALING_MINUTES, HEALING_SCENES,
   loadHealingPrefs, saveHealingPrefs, sceneForWeather,
-  type CurrentWeather, type HealingMinutes, type HealingPrefs, type WeatherEffect,
+  type CurrentWeather, type HealingMinutes, type HealingSceneId, type HealingPrefs, type WeatherEffect,
 } from "@/lib/team/healing";
 import { cn } from "@/lib/utils";
 import { PanoramaViewer } from "./panorama-viewer";
@@ -15,6 +15,10 @@ import styles from "./healing.module.css";
 
 interface HealingOverlayProps {
   onClose: () => void;
+  /** Render inside the page area instead of a full-screen modal. */
+  inline?: boolean;
+  /** Extra controls shown above the scene chips, given the current scene. */
+  children?: (sceneId: HealingSceneId) => ReactNode;
 }
 
 const HEALING_STATUS = "힐링 타임 중 · 잠시 쉬어요";
@@ -47,7 +51,7 @@ function WeatherEffects({ effect }: { effect: WeatherEffect }) {
 }
 
 // Full-screen personal rest view opened from my own desk.
-export function HealingOverlay({ onClose }: HealingOverlayProps) {
+export function HealingOverlay({ onClose, inline = false, children }: HealingOverlayProps) {
   const { account, updateStatus } = useAccount();
   const [prefs, setPrefs] = useState<HealingPrefs>(() => loadHealingPrefs());
   const [weather, setWeather] = useState<CurrentWeather | null>(null);
@@ -78,7 +82,7 @@ export function HealingOverlay({ onClose }: HealingOverlayProps) {
     closeRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") { onClose(); return; }
-      if (event.key !== "Tab") return;
+      if (inline || event.key !== "Tab") return;
       // Keep focus inside the modal.
       const root = dialogRef.current;
       const focusable = root ? Array.from(root.querySelectorAll<HTMLElement>("button, select, canvas[tabindex], [tabindex='0']")).filter((el) => !el.hasAttribute("disabled")) : [];
@@ -91,7 +95,7 @@ export function HealingOverlay({ onClose }: HealingOverlayProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, inline]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -140,7 +144,14 @@ export function HealingOverlay({ onClose }: HealingOverlayProps) {
   }, []);
 
   return (
-    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`힐링 타임 · ${scene.name}`} className="fixed inset-0 z-[80] bg-black text-white" data-testid="healing-overlay">
+    <div
+      ref={dialogRef}
+      role={inline ? "region" : "dialog"}
+      aria-modal={inline ? undefined : true}
+      aria-label={`힐링 타임 · ${scene.name}`}
+      className={inline ? "relative h-[72vh] min-h-[440px] overflow-hidden rounded-2xl bg-black text-white shadow-sm" : "fixed inset-0 z-[80] bg-black text-white"}
+      data-testid={inline ? "healing-place" : "healing-overlay"}
+    >
       <PanoramaViewer
         key={scene.image}
         image={scene.image}
@@ -166,11 +177,12 @@ export function HealingOverlay({ onClose }: HealingOverlayProps) {
         </div>
         <div className="pointer-events-auto flex items-center gap-3">
           <span className="rounded-full bg-black/40 px-3 py-1 font-mono text-lg tabular-nums" aria-live="off" data-testid="healing-timer">{formatRemaining(remaining)}</span>
-          <button ref={closeRef} type="button" onClick={onClose} className="rounded-full bg-white/15 p-2 hover:bg-white/25" aria-label="힐링 타임 끝내기 (Esc)"><X className="size-5" /></button>
+          <button ref={closeRef} type="button" onClick={onClose} className="rounded-full bg-white/15 p-2 hover:bg-white/25" aria-label={inline ? "정비실로 돌아오기 (Esc)" : "힐링 타임 끝내기 (Esc)"} data-testid="healing-close"><X className="size-5" /></button>
         </div>
       </div>
 
       <div className="absolute inset-x-0 bottom-0 space-y-3 bg-gradient-to-t from-black/70 to-transparent p-4 sm:p-6">
+        {children?.(scene.id)}
         <div className="flex flex-wrap gap-2" role="group" aria-label="장소 고르기">
           <button type="button" aria-pressed={prefs.sceneId === "auto"} onClick={() => update({ sceneId: "auto" })} className={cn("rounded-full px-3 py-1.5 text-sm backdrop-blur", prefs.sceneId === "auto" ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25")}>☁️ 지금 날씨대로</button>
           {HEALING_SCENES.map((item) => (

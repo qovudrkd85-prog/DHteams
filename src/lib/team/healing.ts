@@ -21,6 +21,28 @@ export const HEALING_SCENES: readonly HealingScene[] = [
   { id: "snow-forest", name: "눈 내린 숲", caption: "고요한 겨울 숲길", image: "/healing/snowy-forest-path-01.jpg", emoji: "❄️" },
 ];
 
+export type HealingActivityId = "laptop" | "fishing" | "walk" | "rest";
+
+export interface HealingActivity {
+  id: HealingActivityId;
+  name: string;
+  emoji: string;
+  /** Scenes that allow it; omitted = every scene. */
+  scenes?: readonly HealingSceneId[];
+}
+
+export const HEALING_ACTIVITIES: readonly HealingActivity[] = [
+  { id: "laptop", name: "노트북 하기", emoji: "💻" },
+  { id: "fishing", name: "낚시하기", emoji: "🎣", scenes: ["fishing", "beach"] },
+  { id: "walk", name: "산책하기", emoji: "🚶", scenes: ["beach", "mountain", "snow-forest", "fishing"] },
+  { id: "rest", name: "쉬기", emoji: "☕" },
+];
+
+/** Activities allowed at a scene, in display order. */
+export function activitiesFor(sceneId: HealingSceneId): readonly HealingActivity[] {
+  return HEALING_ACTIVITIES.filter((a) => !a.scenes || a.scenes.includes(sceneId));
+}
+
 export const HEALING_MINUTES = [5, 10, 15] as const;
 export type HealingMinutes = (typeof HEALING_MINUTES)[number];
 

@@ -1,19 +1,23 @@
 "use client";
 
-import { useState } from "react";
-import { createPortal } from "react-dom";
 import { Waves } from "lucide-react";
 import { DepartmentCalendar } from "@/components/department-calendar";
 import { TeamPanel } from "@/components/team/panel";
-import { HealingOverlay } from "@/components/team/healing/healing-overlay";
+import { HealingPlace } from "@/components/team/healing/healing-place";
 import type { TeamWorkspaceState } from "@/lib/team/use-team-workspace";
 
 interface GarageProps {
   workspace: TeamWorkspaceState;
+  /** True while the healing place replaces the garage area. */
+  healing: boolean;
+  onHealingEnd: () => void;
 }
 
-/** Personal garage: my status card and my private calendar. */
-export function Garage({ workspace }: GarageProps) {
+/** Personal garage: my status card and my private calendar, or the healing place. */
+export function Garage({ workspace, healing, onHealingEnd }: GarageProps) {
+  if (healing) {
+    return <HealingPlace member={workspace.error ? null : workspace.currentMember} onBack={onHealingEnd} />;
+  }
   return (
     <section className="space-y-5" aria-label="내 정비실" data-testid="garage">
       <TeamPanel workspace={workspace} />
@@ -29,9 +33,12 @@ export function Garage({ workspace }: GarageProps) {
   );
 }
 
-/** Side card that opens the healing time view. */
-export function HealingCard() {
-  const [open, setOpen] = useState(false);
+interface HealingCardProps {
+  onOpen: () => void;
+}
+
+/** Side card that opens the healing place in the garage area. */
+export function HealingCard({ onOpen }: HealingCardProps) {
   return (
     <section className="rounded-2xl bg-gradient-to-br from-sky-700 to-teal-700 p-5 text-white shadow-sm" aria-label="힐링 타임">
       <h2 className="flex items-center gap-2 font-semibold"><Waves className="size-4" /> 힐링 타임</h2>
@@ -40,12 +47,10 @@ export function HealingCard() {
         type="button"
         className="mt-4 w-full rounded-xl bg-white/95 py-2 text-sm font-semibold text-teal-800 hover:bg-white"
         data-testid="healing-open"
-        onClick={() => setOpen(true)}
+        onClick={onOpen}
       >
         힐링 타임 나가기
       </button>
-      {/* Portal: the sticky aside is its own stacking context, so z-index alone stays under the header. */}
-      {open && createPortal(<HealingOverlay onClose={() => setOpen(false)} />, document.body)}
     </section>
   );
 }

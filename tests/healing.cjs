@@ -44,4 +44,12 @@ storage.set("teams:healing", "{broken");
 assert.equal(h.loadHealingPrefs().sceneId, "auto");
 sandbox.window.localStorage.setItem = () => { throw new Error("quota"); };
 assert.doesNotThrow(() => h.saveHealingPrefs({ sceneId: "auto", cityId: "seoul", minutes: 5 }));
-console.log("PASS: healing weather mapping, scene suggestion, timer text, weather parsing, bundled panoramas, safe preferences.");
+// Activities: four kinds, fishing only where there is water to fish in.
+assert.deepEqual([...h.HEALING_ACTIVITIES.map((a) => a.id)],["laptop", "fishing", "walk", "rest"]);
+assert.ok(h.activitiesFor("fishing").some((a) => a.id === "fishing"));
+assert.ok(!h.activitiesFor("rooftop").some((a) => a.id === "fishing"));
+for (const scene of h.HEALING_SCENES) {
+  const ids = h.activitiesFor(scene.id).map((a) => a.id);
+  assert.ok(ids.includes("laptop") && ids.includes("rest"), scene.id);
+}
+console.log("PASS: healing weather mapping, scene suggestion, timer text, weather parsing, bundled panoramas, safe preferences, activities.");
