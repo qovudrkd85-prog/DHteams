@@ -87,17 +87,21 @@ export function DepartmentCalendar({
   members = [],
   currentMember = null,
   onRegister,
+  fixedScope,
 }: {
   members?: TeamMember[];
   currentMember?: TeamMember | null;
   onRegister?: () => void;
+  /** Lock the calendar to one scope (garage shows only my private events). */
+  fixedScope?: "private";
 }) {
   const [month, setMonth] = useState(() => new Date());
   const [selected, setSelected] = useState(() => dateKey(new Date()));
   const [events, setEvents] = useState<DepartmentEvent[]>([]);
   const [filter, setFilter] = useState<EventCategory | "all">("all");
   const [creatorFilter, setCreatorFilter] = useState("all");
-  const [scopeFilter, setScopeFilter] = useState<"all" | EventVisibility>("all");
+  const [scopeFilter, setScopeFilter] = useState<"all" | EventVisibility>(fixedScope ?? "all");
+  const defaultScope = fixedScope ?? "all";
   const [editor, setEditor] = useState<Editor | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -315,7 +319,7 @@ export function DepartmentCalendar({
   return (
     <section
       className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
-      aria-label="부서 공유 달력"
+      aria-label={fixedScope ? "내 개인 일정 달력" : "부서 공유 달력"}
     >
       <div className="flex flex-wrap items-center justify-between gap-4 p-5 sm:p-6">
         <div className="flex items-center gap-3">
@@ -323,9 +327,9 @@ export function DepartmentCalendar({
             <CalendarDays className="size-5" />
           </span>
           <div>
-            <h2 className="font-semibold text-slate-900">부서 공유 달력</h2>
+            <h2 className="font-semibold text-slate-900">{fixedScope ? "내 개인 일정" : "부서 공유 달력"}</h2>
             <p className="mt-1 text-xs text-slate-500">
-              업무부터 회식까지, 누가 등록했는지 한눈에
+              {fixedScope ? "나에게만 보이는 일정이에요" : "업무부터 회식까지, 누가 등록했는지 한눈에"}
             </p>
           </div>
         </div>
@@ -426,7 +430,7 @@ export function DepartmentCalendar({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 sm:px-6">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex rounded-lg bg-slate-100 p-0.5" role="group" aria-label="일정 보기 범위">
+          {!fixedScope && <div className="flex rounded-lg bg-slate-100 p-0.5" role="group" aria-label="일정 보기 범위">
             {([["all", "모든 일정"], ["team", "팀 일정"], ["private", "내 개인 일정"]] as const).map(([key, label]) => (
               <button
                 key={key}
@@ -438,7 +442,7 @@ export function DepartmentCalendar({
                 {label}
               </button>
             ))}
-          </div>
+          </div>}
           <Label htmlFor="event-creator-filter" className="text-xs text-slate-500">
             등록자
           </Label>
@@ -459,14 +463,14 @@ export function DepartmentCalendar({
             ))}
             <option value="unassigned">등록자 미지정</option>
           </select>
-          {(filter !== "all" || activeCreatorFilter !== "all" || scopeFilter !== "all") && (
+          {(filter !== "all" || activeCreatorFilter !== "all" || scopeFilter !== defaultScope) && (
             <button
               type="button"
               className="text-xs text-teal-700 hover:underline"
               onClick={() => {
                 setFilter("all");
                 setCreatorFilter("all");
-                setScopeFilter("all");
+                setScopeFilter(defaultScope);
               }}
             >
               필터 초기화

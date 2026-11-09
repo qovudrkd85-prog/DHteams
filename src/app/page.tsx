@@ -10,6 +10,7 @@ import { AppHeader } from "@/components/app-header";
 import { DepartmentCalendar } from "@/components/department-calendar";
 import { HubTabs, useHubView } from "@/components/team/hub-tabs";
 import { TeamPanel } from "@/components/team/panel";
+import { Garage, HealingCard } from "@/components/team/garage";
 import { TeamRoomMini } from "@/components/team/team-room";
 import { TrashDialog } from "@/components/trash-dialog";
 import { Button } from "@/components/ui/button";
@@ -195,9 +196,7 @@ export default function HomePage() {
                 />
               </section>
             ) : (
-              <section aria-label="내 정비실" data-testid="garage">
-                <TeamPanel workspace={workspace} />
-              </section>
+              <Garage workspace={workspace} />
             )}
           </div>
           <aside
@@ -214,6 +213,7 @@ export default function HomePage() {
                 <TeamPanel workspace={workspace} />
               </>
             )}
+            {view === "garage" && <HealingCard />}
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-100 p-5">
                 <div className="mb-1 flex items-center gap-2">
