@@ -29,6 +29,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     const soonDay = Math.min(td + 3, new Date(Date.UTC(ty, tm, 0)).getUTCDate());
     const soon = new Date(Date.UTC(ty, tm - 1, soonDay)).toISOString().slice(0, 10);
     const soonLabel = soonDay === td ? "D-day" : `D-${soonDay - td}`;
+    const pastKey = (n) => new Date(Date.UTC(ty, tm - 1, td - n)).toISOString().slice(0, 10);
     const members = [
       { id: "11111111-1111-4111-8111-111111111111", name: "김민수", role: "설계", avatar: "🐻", color: "#547867", created_at: today },
       { id: "22222222-2222-4222-8222-222222222222", name: "이지은", role: "기획", avatar: "🐱", color: "#5B7FA6", created_at: today },
@@ -55,6 +56,9 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     const schedules = [
       { id: "s1", project_id: "p1", title: "중간보고서 제출", due_date: today, assignee: "김민수", note: null, color: "yellow", done: false, created_at: stamp(), deleted_at: null, projects: { name: "효곡지구 자연재해위험개선지구", code: null, deleted_at: null } },
       { id: "s4", project_id: "p3", title: "후포 현장조사", due_date: soon, assignee: null, note: null, color: "green", done: false, created_at: stamp(), deleted_at: null, projects: { name: "후포지구 풍수해생활권", code: "2026-03", deleted_at: null } },
+      // p2: an older finished deadline (no badge) and a newer open overdue one (D+1).
+      { id: "s5", project_id: "p2", title: "지평 끝난 일정", due_date: pastKey(2), assignee: null, note: null, color: "blue", done: true, created_at: stamp(), deleted_at: null, projects: { name: "지평지구", code: "2026-02", deleted_at: null } },
+      { id: "s6", project_id: "p2", title: "지평 밀린 보고", due_date: pastKey(1), assignee: null, note: null, color: "blue", done: false, created_at: stamp(), deleted_at: null, projects: { name: "지평지구", code: "2026-02", deleted_at: null } },
       { id: "s3", project_id: "p1", title: "지워진 일정", due_date: today, assignee: null, note: null, color: "blue", done: false, created_at: stamp(), deleted_at: today, projects: { name: "효곡지구 자연재해위험개선지구", code: null, deleted_at: null } },
       { id: "s2", project_id: "p9", title: "삭제된 과업 마감", due_date: today, assignee: null, note: null, color: "pink", done: false, created_at: stamp(), deleted_at: null, projects: { name: "삭제된 과업", code: null, deleted_at: today } },
     ];
@@ -182,7 +186,10 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await upcomingOf("p1").waitFor();
     assert.equal(await upcomingOf("p1").textContent(), "D-day중간보고서 제출");
     assert.equal(await upcomingOf("p3").textContent(), `${soonLabel}후포 현장조사`);
-    assert.equal(await upcomingOf("p2").count(), 0, "A project without upcoming deadlines shows no badge.");
+    // Open overdue deadlines win as D+n; finished ones never badge.
+    assert.equal(await upcomingOf("p2").textContent(), "D+1지평 밀린 보고");
+    assert.equal(await upcomingOf("p2").getAttribute("data-overdue"), "true");
+    assert.equal(await upcomingOf("p1").getAttribute("data-overdue"), null);
     await page.getByLabel("과업 검색").fill("후포");
     assert.equal(await page.locator("aside a").count(), 1);
     assert.equal(
@@ -221,14 +228,19 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await page.getByRole("button", { name: "과업 마감", exact: true }).click();
     const hupo = page.locator('a[title^="과업 마감 · 후포지구 풍수해생활권 · 후포 현장조사"]');
     await hupo.first().waitFor();
+    const monthCountText = () => page.getByText(/이달의 일정 \d+건/).first().textContent();
+    const countAll = await monthCountText();
     await page.getByLabel("과업 선택").selectOption("p3");
     await deadline.first().waitFor({ state: "detached" });
     await hupo.first().waitFor();
+    // The month count follows the project filter (soon is clamped into this month).
+    assert.equal(await monthCountText(), "이달의 일정 1건");
     await page.getByLabel("과업 선택").selectOption("p1");
     await deadline.first().waitFor();
     await hupo.first().waitFor({ state: "detached" });
     await page.getByLabel("과업 선택").selectOption("all");
     await deadline.first().waitFor();
+    assert.equal(await monthCountText(), countAll, "Back to all projects restores the count.");
     await page.getByRole("button", { name: "전체", exact: true }).click();
     await page.locator('button[title^="회의 · 부서 주간회의 ·"]').first().waitFor();
     // A failing deadline load keeps the team events and says why.
@@ -478,9 +490,12 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.equal(await page.locator("aside a").count(), 3);
     // "팀 달력에서 보기" on a project's calendar opens the team room on that project.
     missing = false;
+    // The focus link shows the team room without overwriting the remembered tab.
+    await page.evaluate(() => localStorage.setItem("teams-hub-view", "garage"));
     await page.goto(`${baseURL}/?project=p3`);
     await calendar.waitFor();
     assert.equal(await page.getByTestId("hub-tab-team").getAttribute("aria-selected"), "true");
+    assert.equal(await page.evaluate(() => localStorage.getItem("teams-hub-view")), "garage");
     // Focus lands after the project is validated and its next deadline is looked up.
     await page.getByRole("button", { name: "과업 마감", exact: true, pressed: true }).waitFor();
     assert.equal(await page.getByLabel("과업 선택").inputValue(), "p3");

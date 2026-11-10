@@ -247,9 +247,14 @@ export function DepartmentCalendar({
   const dayDeadlines = visibleDeadlines.filter((d) => d.due_date === selected);
   const monthCount = currentEvents.filter(
     (e) =>
+      filter !== "deadline" &&
       (!fixedScope || (e.visibility ?? "team") === fixedScope) &&
       e.starts_on.slice(0, 7) <= monthKey && e.ends_on.slice(0, 7) >= monthKey,
-  ).length + (deadlines ?? []).filter((d) => d.due_date.slice(0, 7) === monthKey).length;
+  ).length + (deadlines ?? []).filter(
+    (d) =>
+      d.due_date.slice(0, 7) === monthKey &&
+      (filter !== "deadline" || projectFilter === "all" || d.project_id === projectFilter),
+  ).length;
   const today = dateKey(new Date());
   const isLoading = loading || (!error && loadedRange !== range);
 

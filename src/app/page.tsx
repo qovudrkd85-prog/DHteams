@@ -9,6 +9,7 @@ import { ArrowUpRight, FolderOpen, Search, Sprout } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { DepartmentCalendar } from "@/components/department-calendar";
 import { HubTabs, useHubView } from "@/components/team/hub-tabs";
+import type { HubView } from "@/lib/team/rooms";
 import { TeamPanel } from "@/components/team/panel";
 import { Garage, HealingCard } from "@/components/team/garage";
 import { TeamRoomMini } from "@/components/team/team-room";
@@ -43,7 +44,17 @@ export default function HomePage() {
   const [trashOpen, setTrashOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [view, changeView] = useHubView();
+  const [savedView, saveView] = useHubView();
+  // One-shot view from a focus link; shown without overwriting the remembered tab.
+  const [focusView, setFocusView] = useState<HubView | null>(null);
+  const view = focusView ?? savedView;
+  const changeView = useCallback(
+    (next: HubView) => {
+      setFocusView(null);
+      saveView(next);
+    },
+    [saveView],
+  );
   // Project the team calendar was asked to open on (from a project's "팀 달력에서 보기").
   const [focusProject, setFocusProject] = useState<string | null>(null);
   const upcoming = useUpcomingDeadlines(loading ? null : projects);
@@ -95,11 +106,11 @@ export default function HomePage() {
   const takeFocus = useCallback(
     (projectId: string) => {
       setFocusProject(projectId);
-      changeView("team");
+      setFocusView("team");
       // Drop the one-shot param so a reload does not pull the hub back to the team room.
       router.replace("/", { scroll: false });
     },
-    [changeView, router],
+    [router],
   );
 
   async function handleCreate(event: React.FormEvent) {

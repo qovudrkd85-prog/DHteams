@@ -7,8 +7,8 @@ import { cn } from "@/lib/utils";
 import { dateKey } from "@/lib/department-events";
 import {
   dDayLabel,
+  badgeDeadlineByProject,
   listProjectDeadlines,
-  nextDeadlineByProject,
   projectTone,
   type ProjectDeadline,
 } from "@/lib/project-deadlines";
@@ -16,6 +16,8 @@ import type { Project } from "@/lib/types";
 
 /** How far ahead the project list looks for the next deadline. */
 const UPCOMING_DAYS = 60;
+/** How far back the project list looks for open overdue deadlines (shown as D+n). */
+const OVERDUE_DAYS = 30;
 
 /** Choose one project (or all) while the team calendar shows deadlines only. */
 export function ProjectPicker({
@@ -76,9 +78,9 @@ export function useUpcomingDeadlines(reloadKey: unknown) {
     if (reloadKey === null) return;
     let alive = true;
     const today = dateKey(new Date());
-    listProjectDeadlines(today, addDays(today, UPCOMING_DAYS), { openOnly: true })
+    listProjectDeadlines(addDays(today, -OVERDUE_DAYS), addDays(today, UPCOMING_DAYS), { openOnly: true })
       .then((rows) => {
-        if (alive) setState({ next: nextDeadlineByProject(rows, today), error: null });
+        if (alive) setState({ next: badgeDeadlineByProject(rows, today), error: null });
       })
       .catch((err: unknown) => {
         if (alive) setState({ next: new Map(), error: err instanceof Error ? err.message : String(err) });
@@ -128,13 +130,20 @@ export function useFocusTarget(projectId: string | null, projects: Project[], lo
 export function UpcomingBadge({ item }: { item?: { deadline: ProjectDeadline; days: number } }) {
   if (!item) return null;
   const tone = projectTone(item.deadline.project_id);
+  const overdue = item.days < 0;
   return (
     <p
       className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-slate-600"
       data-testid="project-upcoming"
-      title={`다가오는 일정 · ${item.deadline.title} · ${item.deadline.due_date}`}
+      data-overdue={overdue ? "true" : undefined}
+      title={`${overdue ? "지난 일정" : "다가오는 일정"} · ${item.deadline.title} · ${item.deadline.due_date}`}
     >
-      <span className={cn("shrink-0 rounded border-l-2 px-1.5 py-0.5 font-semibold tabular-nums", tone.chip)}>
+      <span
+        className={cn(
+          "shrink-0 rounded border-l-2 px-1.5 py-0.5 font-semibold tabular-nums",
+          overdue ? "border-rose-500 bg-rose-50 text-rose-700" : tone.chip,
+        )}
+      >
         {dDayLabel(item.days)}
       </span>
       <span className="truncate">{item.deadline.title}</span>
