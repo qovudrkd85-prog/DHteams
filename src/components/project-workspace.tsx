@@ -67,10 +67,17 @@ function collectDescendantIds(nodes: TreeNode[], rootId: string): Set<string> {
   return ids;
 }
 
-export function ProjectWorkspace({ projectId }: { projectId: string }) {
+export function ProjectWorkspace({
+  projectId,
+  initialView,
+}: {
+  projectId: string;
+  /** "schedule" opens the project's calendar first (links from the team room). */
+  initialView?: "schedule";
+}) {
   const [project, setProject] = useState<Project | null>(null);
   const [nodes, setNodes] = useState<TreeNode[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialView === "schedule" ? SCHEDULE_ID : null);
   const [logs, setLogs] = useState<FileLog[]>([]);
   const [logsNodeId, setLogsNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

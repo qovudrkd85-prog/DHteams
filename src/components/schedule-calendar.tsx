@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { CalendarDays, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -210,6 +211,14 @@ export function ScheduleCalendar({
         <span className="text-xs text-muted-foreground">
           남은 일 {todoCount}건
         </span>
+        <Link
+          href={`/?project=${encodeURIComponent(projectId)}`}
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-teal-700 hover:bg-teal-50"
+          data-testid="schedule-team-calendar-link"
+        >
+          <CalendarDays className="size-3.5" aria-hidden="true" />
+          팀 달력에서 보기
+        </Link>
         <div className="flex-1" />
         <Button
           variant="outline"

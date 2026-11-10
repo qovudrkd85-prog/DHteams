@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ChevronRight, Flag } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { DEADLINE_STYLE, type ProjectDeadline } from "@/lib/project-deadlines";
+import { DEADLINE_STYLE, projectTone, type ProjectDeadline } from "@/lib/project-deadlines";
 
 /** Hover/tooltip text, also what the browser tests select on. */
 export function deadlineTitle(deadline: ProjectDeadline): string {
@@ -15,12 +15,12 @@ export function deadlineTitle(deadline: ProjectDeadline): string {
 export function DeadlineChip({ deadline }: { deadline: ProjectDeadline }) {
   return (
     <Link
-      href={`/projects/${deadline.project_id}`}
+      href={`/projects/${deadline.project_id}?view=schedule`}
       title={deadlineTitle(deadline)}
       data-deadline={deadline.done ? "done" : "open"}
       className={cn(
         "block w-full truncate rounded border-l-2 px-1.5 py-1 text-left text-[11px]",
-        DEADLINE_STYLE.className,
+        projectTone(deadline.project_id).chip,
         deadline.done && "opacity-60 line-through",
       )}
     >
@@ -37,12 +37,12 @@ export function DeadlineChip({ deadline }: { deadline: ProjectDeadline }) {
 export function DeadlineRow({ deadline }: { deadline: ProjectDeadline }) {
   return (
     <Link
-      href={`/projects/${deadline.project_id}`}
+      href={`/projects/${deadline.project_id}?view=schedule`}
       title={deadlineTitle(deadline)}
       data-deadline={deadline.done ? "done" : "open"}
       className="flex w-full items-start gap-3 rounded-xl border border-amber-100 bg-amber-50/40 p-3 text-left transition-colors hover:bg-amber-50"
     >
-      <span className={cn("mt-0.5 shrink-0 rounded-md px-2 py-1 text-[11px]", DEADLINE_STYLE.className)}>
+      <span className={cn("mt-0.5 shrink-0 rounded-md border px-2 py-1 text-[11px]", projectTone(deadline.project_id).chip)}>
         {DEADLINE_STYLE.label}
       </span>
       <div className="min-w-0 flex-1">

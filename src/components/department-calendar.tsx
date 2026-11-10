@@ -45,9 +45,12 @@ import {
   DEADLINE_STYLE,
   deadlineMatchesCreator,
   listProjectDeadlines,
+  projectTone,
   type ProjectDeadline,
 } from "@/lib/project-deadlines";
 import { DeadlineChip, DeadlineRow } from "@/components/team/deadline-items";
+import { ProjectPicker } from "@/components/team/project-deadline-filter";
+import type { Project } from "@/lib/types";
 
 const categories = Object.entries(EVENT_CATEGORIES) as [
   EventCategory,
@@ -96,6 +99,9 @@ export function DepartmentCalendar({
   onRegister,
   fixedScope,
   active = true,
+  projects = [],
+  focusProject = null,
+  focusDate = null,
 }: {
   members?: TeamMember[];
   currentMember?: TeamMember | null;
@@ -104,6 +110,12 @@ export function DepartmentCalendar({
   fixedScope?: "private";
   /** False while kept mounted but hidden (keeps month/filters); polling pauses and it reloads on return. */
   active?: boolean;
+  /** Live projects for the deadline project picker. */
+  projects?: readonly Pick<Project, "id" | "name">[];
+  /** Open on this project's deadlines (link from a project's own calendar). */
+  focusProject?: string | null;
+  /** That project's next open deadline (YYYY-MM-DD); the calendar jumps to its month once. */
+  focusDate?: string | null;
 }) {
   const [month, setMonth] = useState(() => new Date());
   const [selected, setSelected] = useState(() => dateKey(new Date()));
@@ -112,8 +124,26 @@ export function DepartmentCalendar({
   const [deadlines, setDeadlines] = useState<ProjectDeadline[] | null>([]);
   const [deadlineError, setDeadlineError] = useState<string | null>(null);
   const [filter, setFilter] = useState<EventCategory | "all" | "deadline">("all");
+  const [projectFilter, setProjectFilter] = useState("all");
+  const [seenFocus, setSeenFocus] = useState<string | null>(null);
+  const [seenFocusDate, setSeenFocusDate] = useState<string | null>(null);
   const [creatorFilter, setCreatorFilter] = useState("all");
   const [scopeFilter, setScopeFilter] = useState<"all" | EventVisibility>(fixedScope ?? "all");
+  if (focusProject && focusProject !== seenFocus && !fixedScope) {
+    // Show only that project's deadlines; other filters would hide them.
+    setSeenFocus(focusProject);
+    setSeenFocusDate(null);
+    setFilter("deadline");
+    setProjectFilter(focusProject);
+    setCreatorFilter("all");
+    setScopeFilter("all");
+  }
+  if (focusProject && focusDate && focusDate !== seenFocusDate && !fixedScope) {
+    setSeenFocusDate(focusDate);
+    const [fy, fm] = focusDate.split("-").map(Number);
+    setMonth(new Date(fy, fm - 1, 1));
+    setSelected(focusDate);
+  }
   const defaultScope = fixedScope ?? "all";
   const [editor, setEditor] = useState<Editor | null>(null);
   const [busy, setBusy] = useState(false);
@@ -209,6 +239,7 @@ export function DepartmentCalendar({
   const visibleDeadlines =
     loadedRange === range && (filter === "all" || filter === "deadline") && scopeFilter !== "private"
       ? (deadlines ?? []).filter((d) =>
+          (filter !== "deadline" || projectFilter === "all" || d.project_id === projectFilter) &&
           deadlineMatchesCreator(d, activeCreatorFilter, currentMember?.name, creators.get(activeCreatorFilter)),
         )
       : [];
@@ -487,6 +518,9 @@ export function DepartmentCalendar({
             {DEADLINE_STYLE.label}
           </button>
         )}
+        {!fixedScope && filter === "deadline" && (
+          <ProjectPicker projects={projects} value={projectFilter} onChange={setProjectFilter} />
+        )}
       </div>
       {deadlines === null && !error && (
         <p role="status" className="px-5 pb-2 text-xs text-amber-700 sm:px-6">
@@ -534,6 +568,7 @@ export function DepartmentCalendar({
               className="text-xs text-teal-700 hover:underline"
               onClick={() => {
                 setFilter("all");
+                setProjectFilter("all");
                 setCreatorFilter("all");
                 setScopeFilter(defaultScope);
               }}
@@ -693,7 +728,7 @@ export function DepartmentCalendar({
                   <span
                     key={deadline.id}
                     title={`${DEADLINE_STYLE.label} · ${deadline.project_name} · ${deadline.title}`}
-                    className={cn("size-1.5 rounded-full", DEADLINE_STYLE.dot)}
+                    className={cn("size-1.5 rounded-full", projectTone(deadline.project_id).dot)}
                   />
                 ))}
                 {items.slice(0, Math.max(0, 5 - due.length)).map((item) => (

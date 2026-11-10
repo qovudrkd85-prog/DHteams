@@ -24,6 +24,11 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     const today = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Seoul",
     }).format(new Date());
+    const [ty, tm, td] = today.split("-").map(Number);
+    // Same month as today so the team calendar shows it without paging; D-0..3.
+    const soonDay = Math.min(td + 3, new Date(Date.UTC(ty, tm, 0)).getUTCDate());
+    const soon = new Date(Date.UTC(ty, tm - 1, soonDay)).toISOString().slice(0, 10);
+    const soonLabel = soonDay === td ? "D-day" : `D-${soonDay - td}`;
     const members = [
       { id: "11111111-1111-4111-8111-111111111111", name: "김민수", role: "설계", avatar: "🐻", color: "#547867", created_at: today },
       { id: "22222222-2222-4222-8222-222222222222", name: "이지은", role: "기획", avatar: "🐱", color: "#5B7FA6", created_at: today },
@@ -49,6 +54,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     // Project schedules: one live project, one in the trash (must stay hidden).
     const schedules = [
       { id: "s1", project_id: "p1", title: "중간보고서 제출", due_date: today, assignee: "김민수", note: null, color: "yellow", done: false, created_at: stamp(), deleted_at: null, projects: { name: "효곡지구 자연재해위험개선지구", code: null, deleted_at: null } },
+      { id: "s4", project_id: "p3", title: "후포 현장조사", due_date: soon, assignee: null, note: null, color: "green", done: false, created_at: stamp(), deleted_at: null, projects: { name: "후포지구 풍수해생활권", code: "2026-03", deleted_at: null } },
       { id: "s3", project_id: "p1", title: "지워진 일정", due_date: today, assignee: null, note: null, color: "blue", done: false, created_at: stamp(), deleted_at: today, projects: { name: "효곡지구 자연재해위험개선지구", code: null, deleted_at: null } },
       { id: "s2", project_id: "p9", title: "삭제된 과업 마감", due_date: today, assignee: null, note: null, color: "pink", done: false, created_at: stamp(), deleted_at: null, projects: { name: "삭제된 과업", code: null, deleted_at: today } },
     ];
@@ -95,7 +101,14 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
         assert.ok(due.gte && due.lte, "Deadlines must be fetched for the visible range only.");
         assert.equal(url.searchParams.get("deleted_at"), "is.null");
         const liveProjectsOnly = url.searchParams.get("projects.deleted_at") === "is.null";
-        return route.fulfill({ json: schedules.filter((row) => !row.deleted_at && row.due_date >= due.gte && row.due_date <= due.lte && (!liveProjectsOnly || !row.projects.deleted_at)) });
+        const onlyProject = url.searchParams.get("project_id")?.slice(3);
+        const openOnly = url.searchParams.get("done") === "eq.false";
+        const limit = Number(url.searchParams.get("limit")) || Infinity;
+        const rows = schedules
+          .filter((row) => !row.deleted_at && row.due_date >= due.gte && row.due_date <= due.lte && (!liveProjectsOnly || !row.projects.deleted_at))
+          .filter((row) => (!onlyProject || row.project_id === onlyProject) && (!openOnly || !row.done))
+          .sort((a, b) => a.due_date.localeCompare(b.due_date));
+        return route.fulfill({ json: rows.slice(0, limit) });
       }
       if (!url.pathname.endsWith("/department_events"))
         return route.fulfill({ json: [] });
@@ -164,11 +177,17 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     }
     await calendar.waitFor();
     assert.equal(await page.getByRole("dialog", { name: "우리 팀 공유 달력", exact: true }).count(), 0, "The team calendar is inline, not a dialog.");
+    // Each project in the list shows its nearest open deadline as D-n.
+    const upcomingOf = (id) => page.locator(`aside a[href="/projects/${id}?view=schedule"] [data-testid="project-upcoming"]`);
+    await upcomingOf("p1").waitFor();
+    assert.equal(await upcomingOf("p1").textContent(), "D-day중간보고서 제출");
+    assert.equal(await upcomingOf("p3").textContent(), `${soonLabel}후포 현장조사`);
+    assert.equal(await upcomingOf("p2").count(), 0, "A project without upcoming deadlines shows no badge.");
     await page.getByLabel("과업 검색").fill("후포");
     assert.equal(await page.locator("aside a").count(), 1);
     assert.equal(
       await page.locator("aside a").getAttribute("href"),
-      "/projects/p3",
+      "/projects/p3?view=schedule",
     );
     await page.getByLabel("과업 검색").fill("");
     await openCalendar();
@@ -176,7 +195,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     // Deadlines of every live project show read-only on the team calendar and link to the project.
     const deadline = page.locator('a[title^="과업 마감 · 효곡지구 자연재해위험개선지구 · 중간보고서 제출"]');
     await deadline.first().waitFor();
-    assert.equal(await deadline.first().getAttribute("href"), "/projects/p1");
+    assert.equal(await deadline.first().getAttribute("href"), "/projects/p1?view=schedule");
     assert.equal(await page.locator('a[title*="삭제된 과업"]').count(), 0, "Deadlines of trashed projects stay hidden.");
     assert.equal(await page.locator('a[title*="지워진 일정"]').count(), 0, "Soft-deleted schedules stay hidden.");
     await page.screenshot({ path: "artifacts/calendar-deadlines.png" });
@@ -197,6 +216,21 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.equal(await deadline.count(), 0);
     await page.getByLabel("등록자", { exact: true }).selectOption("all");
     await deadline.first().waitFor();
+    // The deadline view narrows to one project at a time.
+    assert.equal(await page.getByLabel("과업 선택").count(), 0, "The project picker only shows with the deadline filter.");
+    await page.getByRole("button", { name: "과업 마감", exact: true }).click();
+    const hupo = page.locator('a[title^="과업 마감 · 후포지구 풍수해생활권 · 후포 현장조사"]');
+    await hupo.first().waitFor();
+    await page.getByLabel("과업 선택").selectOption("p3");
+    await deadline.first().waitFor({ state: "detached" });
+    await hupo.first().waitFor();
+    await page.getByLabel("과업 선택").selectOption("p1");
+    await deadline.first().waitFor();
+    await hupo.first().waitFor({ state: "detached" });
+    await page.getByLabel("과업 선택").selectOption("all");
+    await deadline.first().waitFor();
+    await page.getByRole("button", { name: "전체", exact: true }).click();
+    await page.locator('button[title^="회의 · 부서 주간회의 ·"]').first().waitFor();
     // A failing deadline load keeps the team events and says why.
     failDeadlines = true;
     await page.getByRole("button", { name: "다음 달", exact: true }).click();
@@ -442,9 +476,30 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     );
     await closeCalendar();
     assert.equal(await page.locator("aside a").count(), 3);
+    // "팀 달력에서 보기" on a project's calendar opens the team room on that project.
+    missing = false;
+    await page.goto(`${baseURL}/?project=p3`);
+    await calendar.waitFor();
+    assert.equal(await page.getByTestId("hub-tab-team").getAttribute("aria-selected"), "true");
+    // Focus lands after the project is validated and its next deadline is looked up.
+    await page.getByRole("button", { name: "과업 마감", exact: true, pressed: true }).waitFor();
+    assert.equal(await page.getByLabel("과업 선택").inputValue(), "p3");
+    // Mobile width here: cell chips are hidden, so this is the day-panel row of the jumped-to date.
+    await page.locator('a[title^="과업 마감 · 후포지구 풍수해생활권 · 후포 현장조사"]:visible').first().waitFor();
+    assert.equal(await deadline.count(), 0, "Only the focused project's deadlines show.");
+    await page.waitForFunction(() => !window.location.search, null, { timeout: 10000 });
+    // Reset clears the hidden project filter too, so re-picking "과업 마감" shows every project.
+    await page.getByRole("button", { name: "필터 초기화" }).click();
+    await page.getByRole("button", { name: "과업 마감", exact: true }).click();
+    assert.equal(await page.getByLabel("과업 선택").inputValue(), "all");
+    // An unknown project id is ignored instead of leaving an empty ghost filter.
+    await page.goto(`${baseURL}/?project=nope`);
+    await calendar.waitFor();
+    await page.waitForFunction(() => !window.location.search, null, { timeout: 10000 });
+    assert.notEqual(await page.getByRole("button", { name: "과업 마감", exact: true }).getAttribute("aria-pressed"), "true");
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: inline team calendar, month/filters kept across tabs, nested editor focus, search/navigation links, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
+      "PASS: inline team calendar, month/filters kept across tabs, nested editor focus, search/navigation links, project D-n badges, project picker, project focus link, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
       writes,
     );
   } finally {

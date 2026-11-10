@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ArrowUpRight, FolderOpen, Search, Sprout } from "lucide-react";
 
@@ -12,6 +12,7 @@ import { HubTabs, useHubView } from "@/components/team/hub-tabs";
 import { TeamPanel } from "@/components/team/panel";
 import { Garage, HealingCard } from "@/components/team/garage";
 import { TeamRoomMini } from "@/components/team/team-room";
+import { ProjectFocusListener, UpcomingBadge, useFocusTarget, useUpcomingDeadlines } from "@/components/team/project-deadline-filter";
 import { TrashDialog } from "@/components/trash-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +44,10 @@ export default function HomePage() {
   const [search, setSearch] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [view, changeView] = useHubView();
+  // Project the team calendar was asked to open on (from a project's "팀 달력에서 보기").
+  const [focusProject, setFocusProject] = useState<string | null>(null);
+  const upcoming = useUpcomingDeadlines(loading ? null : projects);
+  const focus = useFocusTarget(focusProject, projects, loading);
   const [healing, setHealing] = useState(false);
   // Set when healing just ended, so the card takes focus back.
   const [healingEnded, setHealingEnded] = useState(false);
@@ -86,6 +91,16 @@ export default function HomePage() {
 
     void reload();
   }, [router, reload]);
+
+  const takeFocus = useCallback(
+    (projectId: string) => {
+      setFocusProject(projectId);
+      changeView("team");
+      // Drop the one-shot param so a reload does not pull the hub back to the team room.
+      router.replace("/", { scroll: false });
+    },
+    [changeView, router],
+  );
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();
@@ -193,6 +208,7 @@ export default function HomePage() {
           </div>
         </div>
 
+        <Suspense fallback={null}><ProjectFocusListener onFocus={takeFocus} /></Suspense>
         <div className="mb-5"><HubTabs view={view} onChange={changeView} /></div>
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="min-w-0 space-y-5">
@@ -203,6 +219,9 @@ export default function HomePage() {
                 currentMember={workspace.error ? null : workspace.currentMember}
                 onRegister={() => workspace.setProfileOpen(true)}
                 active={view === "team"}
+                projects={projects}
+                focusProject={focus.project}
+                focusDate={focus.date}
               />
             </section>
             {view === "garage" && (
@@ -234,8 +253,13 @@ export default function HomePage() {
                   </span>
                 </div>
                 <p className="mb-4 text-xs text-slate-500">
-                  과업을 선택해 파일과 이력을 확인하세요.
+                  과업을 선택해 과업 달력과 파일 이력을 확인하세요.
                 </p>
+                {upcoming.error && (
+                  <p role="status" className="-mt-2 mb-3 text-xs text-amber-700">
+                    다가오는 일정을 불러오지 못했습니다 ({upcoming.error}).
+                  </p>
+                )}
                 <div className="relative">
                   <Search className="absolute top-2.5 left-3 size-4 text-slate-400" />
                   <Input
@@ -274,7 +298,7 @@ export default function HomePage() {
                   visibleProjects.map((project, i) => (
                     <Link
                       key={project.id}
-                      href={`/projects/${project.id}`}
+                      href={`/projects/${project.id}?view=schedule`}
                       className="group flex items-start gap-3 rounded-xl p-3 transition-colors hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-600"
                     >
                       <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-semibold tabular-nums text-slate-500 group-hover:bg-teal-100 group-hover:text-teal-800">
@@ -289,6 +313,7 @@ export default function HomePage() {
                             {project.code}
                           </p>
                         )}
+                        <UpcomingBadge item={upcoming.next.get(project.id)} />
                         {project.description && (
                           <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
                             {project.description}
