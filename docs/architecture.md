@@ -6,7 +6,7 @@
 
 - `components/team/office.tsx`: SVG 캐릭터와 가구, 좌석 표시, 배치도 편집/저장. 그림 스타일은 같은 폴더의 `office.module.css`에 있습니다.
 - `components/team/character.tsx`, `world-art.tsx`: 걷는 캐릭터·상태 말풍선·건물·마당·출입구 그림.
-- `components/team/calendar-launcher.tsx`: 큰 달력 열기/닫기와 필터 유지.
+- `components/team/hub-tabs.tsx`, `team-room.tsx`, `garage.tsx`: 허브 탭(우리 팀 방 / 내 정비실), 팀 방 미니뷰, 개인 정비실. 팀 달력은 팀 탭에 인라인.
 - `lib/team/use-office-presence.ts`, `presence.ts`, `world.ts`: 방향 입력·충돌·위치 동기화·자리 API·공간 연결.
 - `components/account/`: 가입/로그인, 필수 첫 프로필 설정, 내 설정, 계정 상태.
 - `components/team/panel.tsx`: 본인 출퇴근 버튼, 읽기 전용 팀원 목록과 상태.
