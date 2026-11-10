@@ -51,6 +51,7 @@ import {
 } from "@/lib/project-deadlines";
 import { DeadlineChip, DeadlineRow } from "@/components/team/deadline-items";
 import { CalendarLegend } from "@/components/team/calendar-legend";
+import { MonthDeadlineList } from "@/components/team/month-deadline-list";
 import type { Project } from "@/lib/types";
 
 const categories = Object.entries(EVENT_CATEGORIES) as [
@@ -768,6 +769,14 @@ export function DepartmentCalendar({
           );
         })}
       </div>
+      {!fixedScope && (
+        <MonthDeadlineList
+          deadlines={visibleDeadlines.filter((d) => d.due_date.slice(0, 7) === monthKey)}
+          toneMap={toneMap}
+          today={today}
+          onSelectDay={setSelected}
+        />
+      )}
       <div className="border-t border-slate-200 p-5 sm:p-6">
         <div className="mb-4 flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-slate-900">

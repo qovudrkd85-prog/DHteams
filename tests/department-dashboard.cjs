@@ -260,6 +260,23 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await deadline.first().waitFor();
     await page.locator('button[title^="회의 · 부서 주간회의 ·"]').first().waitFor();
     assert.equal(await monthCountText(), countAll, "Turning the chip off restores the count.");
+    // This month's project schedules, one group per team project that has any (PC: open by default).
+    const monthList = calendar.getByTestId("month-deadline-list");
+    assert.equal(await monthList.locator("button[aria-expanded]").getAttribute("aria-expanded"), "true");
+    const thisMonth = today.slice(0, 7);
+    const expectedGroups = new Set(
+      schedules
+        .filter((r) => !r.deleted_at && !r.projects.deleted_at && r.project_id !== "px" && r.due_date.slice(0, 7) === thisMonth)
+        .map((r) => r.project_id),
+    );
+    await monthList.locator('[data-group="p1"]').waitFor();
+    assert.equal(await monthList.locator("[data-group]").count(), expectedGroups.size, "One group per project due this month.");
+    assert.equal(await monthList.locator('[data-group="px"]').count(), 0, "No group for another team's project.");
+    assert.equal(await monthList.getByText("다른 팀 마감").count(), 0);
+    // A row selects its day on the calendar.
+    await monthList.locator('[data-deadline-row="s4"]').click();
+    await page.locator(`button[aria-label="${soon} 일정 보기"][aria-pressed="true"]`).waitFor();
+    await page.locator(`button[aria-label="${today} 일정 보기"]`).click();
     await page.getByRole("button", { name: "전체", exact: true }).click();
     await page.locator('button[title^="회의 · 부서 주간회의 ·"]').first().waitFor();
     // A failing deadline load keeps the team events and says why.
@@ -472,6 +489,8 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await page.reload();
     await calendar.waitFor();
     await page.screenshot({ path: "artifacts/dashboard-mobile.png", fullPage: true });
+    // Phones keep the month list folded until asked.
+    assert.equal(await calendar.getByTestId("month-deadline-list").locator("button[aria-expanded]").getAttribute("aria-expanded"), "false");
     await openCalendar();
     await page
       .getByRole("button", { name: "회의 부서 주간회의", exact: false })
@@ -536,7 +555,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.notEqual(await page.getByRole("button", { name: "과업 마감", exact: true }).getAttribute("aria-pressed"), "true");
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: inline team calendar, month/filters kept across tabs, nested editor focus, search/navigation links, project D-n badges, legend and project chips, team isolation, team-first scope, project focus link, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
+      "PASS: inline team calendar, month/filters kept across tabs, nested editor focus, search/navigation links, project D-n badges, legend and project chips, team isolation, team-first scope, month project list, project focus link, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
       writes,
     );
   } finally {
