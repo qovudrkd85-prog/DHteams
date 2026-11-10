@@ -60,6 +60,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
       { id: "s5", project_id: "p2", title: "지평 끝난 일정", due_date: pastKey(2), assignee: null, note: null, color: "blue", done: true, created_at: stamp(), deleted_at: null, projects: { name: "지평지구", code: "2026-02", deleted_at: null } },
       { id: "s6", project_id: "p2", title: "지평 밀린 보고", due_date: pastKey(1), assignee: null, note: null, color: "blue", done: false, created_at: stamp(), deleted_at: null, projects: { name: "지평지구", code: "2026-02", deleted_at: null } },
       { id: "s3", project_id: "p1", title: "지워진 일정", due_date: today, assignee: null, note: null, color: "blue", done: false, created_at: stamp(), deleted_at: today, projects: { name: "효곡지구 자연재해위험개선지구", code: null, deleted_at: null } },
+      { id: "s7", project_id: "px", title: "다른 팀 마감", due_date: today, assignee: null, note: null, color: "pink", done: false, created_at: stamp(), deleted_at: null, projects: { name: "다른 팀 과업", code: "X-1", deleted_at: null } },
       { id: "s2", project_id: "p9", title: "삭제된 과업 마감", due_date: today, assignee: null, note: null, color: "pink", done: false, created_at: stamp(), deleted_at: null, projects: { name: "삭제된 과업", code: null, deleted_at: today } },
     ];
     let failDeadlines = false;
@@ -176,6 +177,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     async function closeCalendar() {
       await page.getByTestId("hub-tab-garage").click();
       await page.getByTestId("garage").waitFor();
+      assert.equal(await page.getByTestId("garage").getByTestId("calendar-legend").count(), 0, "The garage has no project legend.");
       await page.getByTestId("hub-tab-team").click();
       await calendar.waitFor();
     }
@@ -205,6 +207,8 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.equal(await deadline.first().getAttribute("href"), "/projects/p1?view=schedule");
     assert.equal(await page.locator('a[title*="삭제된 과업"]').count(), 0, "Deadlines of trashed projects stay hidden.");
     assert.equal(await page.locator('a[title*="지워진 일정"]').count(), 0, "Soft-deleted schedules stay hidden.");
+    assert.equal(await page.locator('[title*="다른 팀"]').count(), 0, "Another team's deadlines never show.");
+    assert.equal(await calendar.getByTestId("calendar-legend").count(), 1, "The team room shows the legend.");
     await page.screenshot({ path: "artifacts/calendar-deadlines.png" });
     await page.getByRole("button", { name: "과업 마감", exact: true }).click();
     await deadline.first().waitFor();
@@ -223,24 +227,30 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.equal(await deadline.count(), 0);
     await page.getByLabel("등록자", { exact: true }).selectOption("all");
     await deadline.first().waitFor();
-    // The deadline view narrows to one project at a time.
-    assert.equal(await page.getByLabel("과업 선택").count(), 0, "The project picker only shows with the deadline filter.");
-    await page.getByRole("button", { name: "과업 마감", exact: true }).click();
+    // One chip per team project (none for another team); a chip narrows the calendar to that project.
+    const chip = (id) => calendar.locator(`[data-project-chip="${id}"]`);
+    await chip("p1").waitFor();
+    assert.equal(await calendar.locator("[data-project-chip]").count(), 3, "Every team project has a chip.");
+    assert.equal(await chip("px").count(), 0, "No chip for another team's project.");
     const hupo = page.locator('a[title^="과업 마감 · 후포지구 풍수해생활권 · 후포 현장조사"]');
     await hupo.first().waitFor();
     const monthCountText = () => page.getByText(/이달의 일정 \d+건/).first().textContent();
     const countAll = await monthCountText();
-    await page.getByLabel("과업 선택").selectOption("p3");
+    await chip("p3").click();
+    await page.getByRole("button", { name: "과업 마감", exact: true, pressed: true }).waitFor();
+    assert.equal(await chip("p3").getAttribute("aria-pressed"), "true");
     await deadline.first().waitFor({ state: "detached" });
     await hupo.first().waitFor();
-    // The month count follows the project filter (soon is clamped into this month).
+    // The month count follows the project chip (soon is clamped into this month).
     assert.equal(await monthCountText(), "이달의 일정 1건");
-    await page.getByLabel("과업 선택").selectOption("p1");
+    await chip("p1").click();
     await deadline.first().waitFor();
     await hupo.first().waitFor({ state: "detached" });
-    await page.getByLabel("과업 선택").selectOption("all");
+    // Pressing the chosen chip again turns it off and brings everything back.
+    await chip("p1").click();
     await deadline.first().waitFor();
-    assert.equal(await monthCountText(), countAll, "Back to all projects restores the count.");
+    await page.locator('button[title^="회의 · 부서 주간회의 ·"]').first().waitFor();
+    assert.equal(await monthCountText(), countAll, "Turning the chip off restores the count.");
     await page.getByRole("button", { name: "전체", exact: true }).click();
     await page.locator('button[title^="회의 · 부서 주간회의 ·"]').first().waitFor();
     // A failing deadline load keeps the team events and says why.
@@ -256,6 +266,9 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.equal(await page.getByRole("status").filter({ hasText: "과업 마감을 불러오지" }).count(), 0);
     // Switching tabs keeps month, category and author filters.
     await page.getByRole("button", { name: "다음 달", exact: true }).click();
+    // A month with nothing due still lists every team project, greyed out.
+    await calendar.locator('[data-project-chip="p1"][data-empty="true"]').waitFor();
+    assert.equal(await calendar.locator('[data-project-chip][data-empty="true"]').count(), 3);
     const viewedMonth = await calendar.getByRole("heading", { name: /^\d{4}\. \d{2}$/ }).textContent();
     await page.getByRole("button", { name: "업무", exact: true }).click();
     await page.getByLabel("등록자", { exact: true }).selectOption("mine");
@@ -498,7 +511,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.equal(await page.evaluate(() => localStorage.getItem("teams-hub-view")), "garage");
     // Focus lands after the project is validated and its next deadline is looked up.
     await page.getByRole("button", { name: "과업 마감", exact: true, pressed: true }).waitFor();
-    assert.equal(await page.getByLabel("과업 선택").inputValue(), "p3");
+    assert.equal(await chip("p3").getAttribute("aria-pressed"), "true");
     // Mobile width here: cell chips are hidden, so this is the day-panel row of the jumped-to date.
     await page.locator('a[title^="과업 마감 · 후포지구 풍수해생활권 · 후포 현장조사"]:visible').first().waitFor();
     assert.equal(await deadline.count(), 0, "Only the focused project's deadlines show.");
@@ -506,7 +519,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     // Reset clears the hidden project filter too, so re-picking "과업 마감" shows every project.
     await page.getByRole("button", { name: "필터 초기화" }).click();
     await page.getByRole("button", { name: "과업 마감", exact: true }).click();
-    assert.equal(await page.getByLabel("과업 선택").inputValue(), "all");
+    assert.equal(await calendar.locator('[data-project-chip][aria-pressed="true"]').count(), 0);
     // An unknown project id is ignored instead of leaving an empty ghost filter.
     await page.goto(`${baseURL}/?project=nope`);
     await calendar.waitFor();
@@ -514,7 +527,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.notEqual(await page.getByRole("button", { name: "과업 마감", exact: true }).getAttribute("aria-pressed"), "true");
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: inline team calendar, month/filters kept across tabs, nested editor focus, search/navigation links, project D-n badges, project picker, project focus link, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
+      "PASS: inline team calendar, month/filters kept across tabs, nested editor focus, search/navigation links, project D-n badges, legend and project chips, team isolation, project focus link, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
       writes,
     );
   } finally {

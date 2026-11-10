@@ -11,6 +11,7 @@ import {
   listProjectDeadlines,
   projectTone,
   type ProjectDeadline,
+  type ProjectTone,
 } from "@/lib/project-deadlines";
 import type { Project } from "@/lib/types";
 
@@ -127,9 +128,16 @@ export function useFocusTarget(projectId: string | null, projects: Project[], lo
 }
 
 /** "D-3 · 중간보고서" under a project in the list. */
-export function UpcomingBadge({ item }: { item?: { deadline: ProjectDeadline; days: number } }) {
+export function UpcomingBadge({
+  item,
+  tone: givenTone,
+}: {
+  item?: { deadline: ProjectDeadline; days: number };
+  /** The project's colour from the team's colour map, so the list matches the calendar. */
+  tone?: ProjectTone;
+}) {
   if (!item) return null;
-  const tone = projectTone(item.deadline.project_id);
+  const tone = givenTone ?? projectTone(item.deadline.project_id);
   const overdue = item.days < 0;
   return (
     <p

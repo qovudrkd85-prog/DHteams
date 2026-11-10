@@ -45,11 +45,12 @@ import {
   DEADLINE_STYLE,
   deadlineMatchesCreator,
   listProjectDeadlines,
-  projectTone,
+  projectToneMap,
+  toneFor,
   type ProjectDeadline,
 } from "@/lib/project-deadlines";
 import { DeadlineChip, DeadlineRow } from "@/components/team/deadline-items";
-import { ProjectPicker } from "@/components/team/project-deadline-filter";
+import { CalendarLegend } from "@/components/team/calendar-legend";
 import type { Project } from "@/lib/types";
 
 const categories = Object.entries(EVENT_CATEGORIES) as [
@@ -225,6 +226,12 @@ export function DepartmentCalendar({
       creators.set(event.created_by, event.creator_name || "이전 팀원");
     }
   }
+  // Only the projects the page passed (this team's) count; RLS alone is not the boundary.
+  const toneMap = useMemo(() => projectToneMap(projects.map((p) => p.id)), [projects]);
+  const teamDeadlines = useMemo(() => {
+    const ids = new Set(projects.map((p) => p.id));
+    return (deadlines ?? []).filter((d) => ids.has(d.project_id));
+  }, [deadlines, projects]);
   const visible = currentEvents.filter(
     (e) =>
       (filter === "all" || e.category === filter) &&
@@ -238,7 +245,7 @@ export function DepartmentCalendar({
   );
   const visibleDeadlines =
     loadedRange === range && (filter === "all" || filter === "deadline") && scopeFilter !== "private"
-      ? (deadlines ?? []).filter((d) =>
+      ? teamDeadlines.filter((d) =>
           (filter !== "deadline" || projectFilter === "all" || d.project_id === projectFilter) &&
           deadlineMatchesCreator(d, activeCreatorFilter, currentMember?.name, creators.get(activeCreatorFilter)),
         )
@@ -250,7 +257,7 @@ export function DepartmentCalendar({
       filter !== "deadline" &&
       (!fixedScope || (e.visibility ?? "team") === fixedScope) &&
       e.starts_on.slice(0, 7) <= monthKey && e.ends_on.slice(0, 7) >= monthKey,
-  ).length + (deadlines ?? []).filter(
+  ).length + teamDeadlines.filter(
     (d) =>
       d.due_date.slice(0, 7) === monthKey &&
       (filter !== "deadline" || projectFilter === "all" || d.project_id === projectFilter),
@@ -523,8 +530,17 @@ export function DepartmentCalendar({
             {DEADLINE_STYLE.label}
           </button>
         )}
-        {!fixedScope && filter === "deadline" && (
-          <ProjectPicker projects={projects} value={projectFilter} onChange={setProjectFilter} />
+        {!fixedScope && (
+          <CalendarLegend
+            projects={projects}
+            monthDeadlines={loadedRange === range ? teamDeadlines.filter((d) => d.due_date.slice(0, 7) === monthKey) : []}
+            toneMap={toneMap}
+            value={filter === "deadline" && projectFilter !== "all" ? projectFilter : null}
+            onSelect={(id) => {
+              setFilter(id ? "deadline" : "all");
+              setProjectFilter(id ?? "all");
+            }}
+          />
         )}
       </div>
       {deadlines === null && !error && (
@@ -685,7 +701,7 @@ export function DepartmentCalendar({
               </button>
               <div className="hidden space-y-1 sm:block">
                 {due.slice(0, 3).map((deadline) => (
-                  <DeadlineChip key={deadline.id} deadline={deadline} />
+                  <DeadlineChip key={deadline.id} deadline={deadline} tone={toneFor(toneMap, deadline.project_id)} />
                 ))}
                 {items.slice(0, Math.max(0, 3 - due.length)).map((item) => (
                   <button
@@ -733,7 +749,7 @@ export function DepartmentCalendar({
                   <span
                     key={deadline.id}
                     title={`${DEADLINE_STYLE.label} · ${deadline.project_name} · ${deadline.title}`}
-                    className={cn("size-1.5 rounded-full", projectTone(deadline.project_id).dot)}
+                    className={cn("size-1.5 rounded-full", toneFor(toneMap, deadline.project_id).dot)}
                   />
                 ))}
                 {items.slice(0, Math.max(0, 5 - due.length)).map((item) => (
@@ -796,7 +812,7 @@ export function DepartmentCalendar({
         ) : (
           <div className="space-y-2">
             {dayDeadlines.map((deadline) => (
-              <DeadlineRow key={deadline.id} deadline={deadline} />
+              <DeadlineRow key={deadline.id} deadline={deadline} tone={toneFor(toneMap, deadline.project_id)} />
             ))}
             {dayEvents.map((item) => (
               <button

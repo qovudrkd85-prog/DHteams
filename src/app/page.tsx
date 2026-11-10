@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ArrowUpRight, FolderOpen, Search, Sprout } from "lucide-react";
 
@@ -32,6 +32,7 @@ import { createProject, listProjects } from "@/lib/queries";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import type { Project } from "@/lib/types";
 import { useTeamWorkspace } from "@/lib/team/use-team-workspace";
+import { projectToneMap, toneFor } from "@/lib/project-deadlines";
 
 export default function HomePage() {
   const router = useRouter();
@@ -58,6 +59,8 @@ export default function HomePage() {
   // Project the team calendar was asked to open on (from a project's "팀 달력에서 보기").
   const [focusProject, setFocusProject] = useState<string | null>(null);
   const upcoming = useUpcomingDeadlines(loading ? null : projects);
+  // Same colours as the team calendar (both built from this team's project list).
+  const toneMap = useMemo(() => projectToneMap(projects.map((p) => p.id)), [projects]);
   const focus = useFocusTarget(focusProject, projects, loading);
   const [healing, setHealing] = useState(false);
   // Set when healing just ended, so the card takes focus back.
@@ -324,7 +327,7 @@ export default function HomePage() {
                             {project.code}
                           </p>
                         )}
-                        <UpcomingBadge item={upcoming.next.get(project.id)} />
+                        <UpcomingBadge item={upcoming.next.get(project.id)} tone={toneFor(toneMap, project.id)} />
                         {project.description && (
                           <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
                             {project.description}
