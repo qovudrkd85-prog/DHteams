@@ -129,7 +129,7 @@ export function DepartmentCalendar({
   const [seenFocus, setSeenFocus] = useState<string | null>(null);
   const [seenFocusDate, setSeenFocusDate] = useState<string | null>(null);
   const [creatorFilter, setCreatorFilter] = useState("all");
-  const [scopeFilter, setScopeFilter] = useState<"all" | EventVisibility>(fixedScope ?? "all");
+  const [scopeFilter, setScopeFilter] = useState<"all" | EventVisibility>(fixedScope ?? "team");
   if (focusProject && focusProject !== seenFocus && !fixedScope) {
     // Show only that project's deadlines; other filters would hide them.
     setSeenFocus(focusProject);
@@ -137,7 +137,7 @@ export function DepartmentCalendar({
     setFilter("deadline");
     setProjectFilter(focusProject);
     setCreatorFilter("all");
-    setScopeFilter("all");
+    setScopeFilter("team");
   }
   if (focusProject && focusDate && focusDate !== seenFocusDate && !fixedScope) {
     setSeenFocusDate(focusDate);
@@ -145,7 +145,8 @@ export function DepartmentCalendar({
     setMonth(new Date(fy, fm - 1, 1));
     setSelected(focusDate);
   }
-  const defaultScope = fixedScope ?? "all";
+  // The team room starts on team events; "통합" adds my private ones.
+  const defaultScope = fixedScope ?? "team";
   const [editor, setEditor] = useState<Editor | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -255,7 +256,7 @@ export function DepartmentCalendar({
   const monthCount = currentEvents.filter(
     (e) =>
       filter !== "deadline" &&
-      (!fixedScope || (e.visibility ?? "team") === fixedScope) &&
+      (scopeFilter === "all" || (e.visibility ?? "team") === scopeFilter) &&
       e.starts_on.slice(0, 7) <= monthKey && e.ends_on.slice(0, 7) >= monthKey,
   ).length + teamDeadlines.filter(
     (d) =>
@@ -551,7 +552,7 @@ export function DepartmentCalendar({
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 sm:px-6">
         <div className="flex flex-wrap items-center gap-2">
           {!fixedScope && <div className="flex rounded-lg bg-slate-100 p-0.5" role="group" aria-label="일정 보기 범위">
-            {([["all", "모든 일정"], ["team", "팀 일정"], ["private", "내 개인 일정"]] as const).map(([key, label]) => (
+            {([["team", "팀"], ["all", "통합(+내 개인)"]] as const).map(([key, label]) => (
               <button
                 key={key}
                 type="button"

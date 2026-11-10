@@ -63,6 +63,10 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
       { id: "s7", project_id: "px", title: "다른 팀 마감", due_date: today, assignee: null, note: null, color: "pink", done: false, created_at: stamp(), deleted_at: null, projects: { name: "다른 팀 과업", code: "X-1", deleted_at: null } },
       { id: "s2", project_id: "p9", title: "삭제된 과업 마감", due_date: today, assignee: null, note: null, color: "pink", done: false, created_at: stamp(), deleted_at: null, projects: { name: "삭제된 과업", code: null, deleted_at: today } },
     ];
+    // My own private event: served next to the team rows, never written by the tests.
+    const privateRows = [
+      { id: "pv1", title: "내 병원 예약", category: "other", visibility: "private", starts_on: today, ends_on: today, starts_at: null, location: "", organizer: "", note: "", created_by: members[1].id, creator_name: members[1].name, creator_color: members[1].color, updated_at: "2026-01-01T00:00:00.000Z", deleted_at: null },
+    ];
     let failDeadlines = false;
     const projects = [
       {
@@ -126,7 +130,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
         const start = url.searchParams.get("ends_on")?.slice(4);
         const end = url.searchParams.get("starts_on")?.slice(4);
         return route.fulfill({
-          json: rows.filter(
+          json: [...rows, ...privateRows].filter(
             (r) => !r.deleted_at && r.starts_on <= end && r.ends_on >= start,
           ),
         });
@@ -214,9 +218,14 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await deadline.first().waitFor();
     assert.equal(await page.locator('button[title^="회의 ·"]').count(), 0, "The deadline filter hides team events.");
     await page.getByRole("button", { name: "전체", exact: true }).click();
-    await page.getByRole("button", { name: "내 개인 일정", exact: true }).click();
-    assert.equal(await deadline.count(), 0, "Private scope shows no project deadlines.");
-    await page.getByRole("button", { name: "모든 일정", exact: true }).click();
+    // The team room opens on team scope; my private events only show under "통합(+내 개인)".
+    assert.equal(await page.getByRole("button", { name: "팀", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await calendar.locator('[data-visibility="private"]').count(), 0, "Team scope hides private events.");
+    await page.getByRole("button", { name: "통합(+내 개인)", exact: true }).click();
+    await calendar.locator('[data-visibility="private"]').first().waitFor();
+    await deadline.first().waitFor();
+    await page.getByRole("button", { name: "팀", exact: true }).click();
+    await calendar.locator('[data-visibility="private"]').first().waitFor({ state: "detached" });
     await deadline.first().waitFor();
     // The creator filter reaches deadlines through the free-text assignee.
     await page.getByLabel("등록자", { exact: true }).selectOption(members[0].id);
@@ -527,7 +536,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.notEqual(await page.getByRole("button", { name: "과업 마감", exact: true }).getAttribute("aria-pressed"), "true");
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: inline team calendar, month/filters kept across tabs, nested editor focus, search/navigation links, project D-n badges, legend and project chips, team isolation, project focus link, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
+      "PASS: inline team calendar, month/filters kept across tabs, nested editor focus, search/navigation links, project D-n badges, legend and project chips, team isolation, team-first scope, project focus link, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
       writes,
     );
   } finally {
