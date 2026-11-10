@@ -1,24 +1,38 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { CloudSun, LoaderCircle, X } from "lucide-react";
+import { CloudSun, X } from "lucide-react";
 import { toast } from "sonner";
 import { useAccount } from "@/components/account/provider";
 import {
-  fetchCurrentWeather, findCity, findScene, formatRemaining, HEALING_CITIES, HEALING_MINUTES, HEALING_SCENES,
+  fetchCurrentWeather, findCity, findScene, formatRemaining, HEALING_CITIES, HEALING_MINUTES, HEALING_SCENES, YARD_NAME,
   loadHealingPrefs, saveHealingPrefs, sceneForWeather, startHealingStatus,
-  type CurrentWeather, type HealingMinutes, type HealingSceneId, type HealingPrefs, type WeatherEffect,
+  type CurrentWeather, type HealingMinutes, type HealingPrefs, type WeatherEffect,
 } from "@/lib/team/healing";
+import type { SceneArtId, WorldActivityId } from "@/lib/team/healing-world";
 import { cn } from "@/lib/utils";
-import { PanoramaViewer } from "./panorama-viewer";
+import { HealingWorld, type WalkRequest, type WorldTeleport } from "./healing-world";
 import styles from "./healing.module.css";
+
+/** What the extra controls get: where I am, what I am doing, and a way to walk to an activity. */
+export interface HealingWorldContext {
+  sceneId: SceneArtId;
+  activity: WorldActivityId | null;
+  walkTo: (activity: WorldActivityId) => void;
+}
 
 interface HealingOverlayProps {
   onClose: () => void;
   /** Render inside the page area instead of a full-screen modal. */
   inline?: boolean;
-  /** Extra controls shown above the scene chips, given the current scene. */
-  children?: (sceneId: HealingSceneId) => ReactNode;
+  /** Extra controls shown above the scene chips. */
+  children?: (ctx: HealingWorldContext) => ReactNode;
+}
+
+const ZONE_HEADER: Record<"yard", { emoji: string; name: string; caption: string }> = { yard: { emoji: "🌿", name: YARD_NAME, caption: "어디로든 걸어가 보세요. 문은 지름길이에요." } };
+
+function zoneHeader(zone: SceneArtId): { emoji: string; name: string; caption: string } {
+  return zone === "yard" ? ZONE_HEADER.yard : findScene(zone);
 }
 
 // Fire-and-forget restore that survives tab close/refresh.
@@ -54,10 +68,14 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
   const [prefs, setPrefs] = useState<HealingPrefs>(() => loadHealingPrefs());
   const [weather, setWeather] = useState<CurrentWeather | null>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
-  const [imageResult, setImageResult] = useState<{ image: string; ok: boolean } | null>(null);
+  // Where the character is right now; the chosen chip is only where it starts or jumps to.
+  const [worldScene, setWorldScene] = useState<SceneArtId>(() => (prefs.sceneId === "auto" ? "yard" : prefs.sceneId));
+  const [startZone] = useState<SceneArtId>(worldScene);
+  const [activity, setActivity] = useState<WorldActivityId | null>(null);
+  const [teleport, setTeleport] = useState<WorldTeleport | null>(null);
+  const [walkRequest, setWalkRequest] = useState<WalkRequest | null>(null);
   const [endsAt, setEndsAt] = useState(() => Date.now() + prefs.minutes * 60_000);
   const [now, setNow] = useState(() => Date.now());
-  const [reducedMotion] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const statusAtOpen = useRef(account?.member.status_message ?? "");
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -65,11 +83,12 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
-  const sceneId = prefs.sceneId === "auto" ? (weather ? sceneForWeather(weather) : "beach") : prefs.sceneId;
-  const scene = findScene(sceneId);
+  // Latest scene preference for the weather answer, which may arrive after the person changed it.
+  const sceneIdRef = useRef(prefs.sceneId);
+  useEffect(() => { sceneIdRef.current = prefs.sceneId; }, [prefs.sceneId]);
+  const header = zoneHeader(worldScene);
   const city = findCity(prefs.cityId);
   const remaining = endsAt - now;
-  const imageState = imageResult?.image !== scene.image ? "loading" : imageResult.ok ? "ready" : "error";
 
   const update = useCallback((patch: Partial<HealingPrefs>) => {
     setPrefs((prev) => {
@@ -78,6 +97,18 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
       return next;
     });
   }, []);
+
+  const jumpTo = useCallback((sceneId: SceneArtId, soft = false) => {
+    setTeleport((prev) => ({ sceneId, nonce: (prev?.nonce ?? 0) + 1, soft }));
+  }, []);
+  const walkTo = useCallback((next: WorldActivityId) => {
+    setWalkRequest((prev) => ({ activity: next, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
+  const pickScene = (sceneId: HealingPrefs["sceneId"]) => {
+    update({ sceneId });
+    if (sceneId !== "auto") jumpTo(sceneId);
+    else if (weather) jumpTo(sceneForWeather(weather));
+  };
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -106,14 +137,20 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
   useEffect(() => {
     const controller = new AbortController();
     fetchCurrentWeather(city, controller.signal)
-      .then((next) => { setWeather(next); setWeatherError(null); })
+      .then((next) => {
+        setWeather(next);
+        setWeatherError(null);
+        // "지금 날씨대로": start where the weather suggests, unless the player already wandered off.
+        if (sceneIdRef.current === "auto") jumpTo(sceneForWeather(next), true);
+      })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         setWeather(null);
         setWeatherError(error instanceof Error ? error.message : "날씨를 불러오지 못했습니다.");
       });
     return () => controller.abort();
-  }, [city]);
+    // Refetch on city change only; the scene preference is read (via ref) when the answer arrives.
+  }, [city, jumpTo]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -151,30 +188,29 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
       ref={dialogRef}
       role={inline ? "region" : "dialog"}
       aria-modal={inline ? undefined : true}
-      aria-label={`힐링 타임 · ${scene.name}`}
+      aria-label={`힐링 타임 · ${header.name}`}
       className={inline ? "relative h-[72vh] min-h-[440px] overflow-hidden rounded-2xl bg-black text-white shadow-sm" : "fixed inset-0 z-[80] bg-black text-white"}
       data-testid={inline ? "healing-place" : "healing-overlay"}
     >
-      <PanoramaViewer
-        key={scene.image}
-        image={scene.image}
-        label={`${scene.name} 360도 풍경`}
-        autoRotate={!reducedMotion}
-        onReady={() => setImageResult({ image: scene.image, ok: true })}
-        onError={() => setImageResult({ image: scene.image, ok: false })}
+      <HealingWorld
+        startZone={startZone}
+        teleport={teleport}
+        walkRequest={walkRequest}
+        member={account?.member ?? null}
+        isDay={weather?.isDay ?? true}
+        effect={weather?.effect ?? "clear"}
+        focusRoot={dialogRef}
+        onZone={setWorldScene}
+        onActivity={setActivity}
       />
       <WeatherEffects effect={weather?.effect ?? "clear"} />
       <div className={styles.vignette} />
-      {/* Blurred still of the same photo while the 360 view loads, instead of a black box. */}
-      {imageState === "loading" && <div aria-hidden className="pointer-events-none absolute inset-0 scale-110 bg-cover bg-center opacity-80 blur-md" style={{ backgroundImage: `url(${scene.image})` }} data-testid="healing-preview" />}
-      {imageState === "loading" && <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-sm text-white/80"><LoaderCircle className="size-4 animate-spin" />풍경을 불러오는 중…</div>}
-      {imageState === "error" && <div role="alert" className="absolute inset-x-0 top-1/2 mx-auto w-fit rounded-lg bg-black/60 px-4 py-2 text-sm">풍경 사진을 불러오지 못했어요. 다른 장소를 골라 주세요.</div>}
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 bg-gradient-to-b from-black/60 to-transparent p-4 sm:p-6">
         <div className="pointer-events-auto">
           <p className="text-xs text-white/70">힐링 타임</p>
-          <h2 className="text-xl font-semibold">{scene.emoji} {scene.name}</h2>
-          <p className="text-xs text-white/70">{scene.caption}</p>
+          <h2 className="text-xl font-semibold" data-testid="healing-zone">{header.emoji} {header.name}</h2>
+          <p className="text-xs text-white/70">{header.caption}</p>
           <p className="mt-2 flex items-center gap-1 text-xs text-white/80" data-testid="healing-weather">
             <CloudSun className="size-3.5" />
             {weather ? `${city.name} 지금 ${weather.label}${weather.temperature !== null ? ` · ${Math.round(weather.temperature)}°` : ""}` : weatherError ? `${weatherError} 기본 풍경을 보여 드려요.` : `${city.name} 날씨 확인 중…`}
@@ -187,11 +223,11 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
       </div>
 
       <div className="absolute inset-x-0 bottom-0 space-y-3 bg-gradient-to-t from-black/70 to-transparent p-4 sm:p-6">
-        {children?.(scene.id)}
-        <div className="flex flex-wrap gap-2" role="group" aria-label="장소 고르기">
-          <button type="button" aria-pressed={prefs.sceneId === "auto"} onClick={() => update({ sceneId: "auto" })} className={cn("rounded-full px-3 py-1.5 text-sm backdrop-blur", prefs.sceneId === "auto" ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25")}>☁️ 지금 날씨대로</button>
+        {children?.({ sceneId: worldScene, activity, walkTo })}
+        <div className="flex flex-wrap gap-2" role="group" aria-label="바로 가기">
+          <button type="button" aria-pressed={prefs.sceneId === "auto"} onClick={() => pickScene("auto")} className={cn("rounded-full px-3 py-1.5 text-sm backdrop-blur", prefs.sceneId === "auto" ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25")}>☁️ 지금 날씨대로</button>
           {HEALING_SCENES.map((item) => (
-            <button key={item.id} type="button" aria-pressed={prefs.sceneId === item.id} onClick={() => update({ sceneId: item.id })} className={cn("rounded-full px-3 py-1.5 text-sm backdrop-blur", prefs.sceneId === item.id ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25")}>{item.emoji} {item.name}</button>
+            <button key={item.id} type="button" aria-pressed={prefs.sceneId === item.id} onClick={() => pickScene(item.id)} className={cn("rounded-full px-3 py-1.5 text-sm backdrop-blur", prefs.sceneId === item.id ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25")}>{item.emoji} {item.name}</button>
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-3 text-xs text-white/80">
@@ -205,9 +241,8 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
               <button key={minutes} type="button" aria-pressed={prefs.minutes === minutes} onClick={() => { update({ minutes: minutes as HealingMinutes }); setEndsAt(Date.now() + minutes * 60_000); }} className={cn("rounded px-2 py-1", prefs.minutes === minutes ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25")}>{minutes}분</button>
             ))}
           </span>
-          <span className="hidden sm:inline">끌어서 둘러보기 · 휠로 확대 · 방향키 이동 · Esc 닫기</span>
+          <span className="hidden sm:inline">방향키·WASD 로 걷기 · 탭해서 가기 · 소품에 서면 시작 · Esc 닫기</span>
         </div>
-        <p className="text-[10px] text-white/50">풍경 사진: Poly Haven (CC0)</p>
       </div>
     </div>
   );

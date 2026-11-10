@@ -77,15 +77,24 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     assert.equal(await page.getByTestId("garage").count(), 0, "The healing place replaces the garage area.");
     await page.getByTestId("healing-weather").filter({ hasText: "비" }).waitFor();
     await page.getByTestId("healing-effect-rain").waitFor();
-    assert.match(await place.getAttribute("aria-label"), /옥상 쉼터/, "Rain should suggest the rooftop.");
+    const scene = page.getByTestId("healing-scene");
+    await page.waitForFunction(() => document.querySelector("[data-testid=healing-scene]")?.getAttribute("data-scene") === "rooftop", null, { timeout: 10000 });
+    assert.match(await place.getAttribute("aria-label"), /옥상 쉼터/, "Rain should start me on the rooftop.");
     await until(() => me.status_message !== "오후 보고서 집중 중", "Healing must show teammates I am resting.");
+    // Fast travel chip, then the activity button walks me to the rod and fishing starts on arrival.
     await page.getByRole("button", { name: /낚시터/ }).click();
+    await page.waitForFunction(() => document.querySelector("[data-testid=healing-scene]")?.getAttribute("data-scene") === "fishing");
     await page.getByTestId("healing-activity-fishing").click();
-    assert.equal(await page.getByTestId("healing-avatar").getAttribute("data-activity"), "fishing");
-    await page.waitForFunction(() => !document.querySelector("[data-testid=healing-place]")?.textContent?.includes("불러오는 중"), null, { timeout: 20000 });
+    await page.waitForFunction(() => document.querySelector("[data-testid=healing-avatar]")?.getAttribute("data-activity") === "fishing", null, { timeout: 15000 });
     fs.mkdirSync(path.resolve("artifacts", "logs"), { recursive: true });
     const shot = await page.screenshot({ path: path.resolve("artifacts", "logs", "healing-fishing.png") });
-    assert.ok(shot.length > 50_000, "Panorama screenshot looks empty.");
+    assert.ok(shot.length > 30_000, "World screenshot looks empty.");
+    // One continuous world: holding left walks off the pier straight onto the beach, no portal.
+    await scene.focus();
+    await page.keyboard.down("ArrowLeft");
+    await page.waitForFunction(() => document.querySelector("[data-testid=healing-scene]")?.getAttribute("data-scene") === "beach", null, { timeout: 15000 });
+    await page.keyboard.up("ArrowLeft");
+    await page.waitForFunction(() => document.querySelector("[data-testid=healing-avatar]")?.getAttribute("data-activity") === "rest", null, { timeout: 5000 });
     await page.getByTestId("healing-close").focus();
     await page.keyboard.press("Escape");
     await place.waitFor({ state: "detached" });
@@ -103,14 +112,32 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     assert.equal(await place.count(), 0, "Healing must not reappear after visiting the team tab.");
     await until(() => me.status_message === "오후 보고서 집중 중", "Switching tabs must restore my status.");
 
-    // Mobile: no horizontal document scroll on either tab.
+    // Mobile: no horizontal document scroll on either tab; a tap on the world walks there.
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "Garage must fit the mobile width.");
+    await page.getByTestId("healing-open").click();
+    await place.waitFor();
+    const before = Number(await page.getByTestId("healing-scene").getAttribute("data-x"));
+    const spot = await page.evaluate(() => {
+      const world = document.querySelector("[data-testid=healing-scene]");
+      const r = world.getBoundingClientRect();
+      for (let fy = 0.3; fy <= 0.7; fy += 0.05) for (let fx = 0.1; fx <= 0.9; fx += 0.1) {
+        const x = r.left + r.width * fx;
+        const y = r.top + r.height * fy;
+        if (world.contains(document.elementFromPoint(x, y))) return { x, y };
+      }
+      return null;
+    });
+    assert.ok(spot, "Some part of the world must be tappable on mobile.");
+    await page.mouse.click(spot.x, spot.y);
+    await page.waitForFunction((start) => Number(document.querySelector("[data-testid=healing-scene]")?.getAttribute("data-x")) !== start, before, { timeout: 10000 });
+    await page.getByTestId("healing-close").click();
+    await page.getByTestId("garage").waitFor();
     await openTab("team");
     await page.getByTestId("team-room").waitFor();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "Team tab must fit the mobile width.");
     await page.screenshot({ path: path.resolve("artifacts", "game-world-mobile.png"), fullPage: true });
     assert.deepEqual(errors, []);
-    console.log("PASS: inline team calendar and room, other member seated, status retry, sit once/stand, tab memory across reload, garage -> inline healing (weather, activity, Esc back, status restore), no healing after team tab trip, mobile width.");
+    console.log("PASS: inline team calendar and room, other member seated, status retry, sit once/stand, tab memory across reload, garage -> inline healing (weather start zone, fast travel, walk to rod, seam walk, Esc back, status restore), no healing after team tab trip, mobile width + tap to walk.");
   } finally { await browser.close(); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

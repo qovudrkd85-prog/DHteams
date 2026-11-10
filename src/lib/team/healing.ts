@@ -1,46 +1,52 @@
-// Healing time: personal 360° rest spots. Client-only, no database writes.
-// Panoramas: Poly Haven tonemapped HDRIs, CC0 (public domain), resized into /public/healing.
+// Healing time: a small pixel world to walk around in and rest. Client-only, no database writes.
+// Scene geometry and which prop starts which activity live in healing-world.ts (this file must
+// stay free of runtime imports: tests load it in a bare vm sandbox).
 
-export type HealingSceneId = "beach" | "fishing" | "mountain" | "rooftop" | "rooftop-night" | "snow-forest";
+export type HealingSceneId = "beach" | "fishing" | "mountain" | "rooftop" | "snow-forest" | "camp";
 export type WeatherEffect = "clear" | "cloudy" | "rain" | "snow" | "fog";
 
 export interface HealingScene {
   id: HealingSceneId;
   name: string;
   caption: string;
-  image: string;
   emoji: string;
 }
 
+/** The places you can fast-travel to; the yard in the middle is where you start. */
 export const HEALING_SCENES: readonly HealingScene[] = [
-  { id: "beach", name: "바닷가", caption: "파도 소리 들리는 해변", image: "/healing/fish-hoek-beach.jpg", emoji: "🌊" },
-  { id: "fishing", name: "낚시터", caption: "호숫가 잔교에서 낚싯대 드리우기", image: "/healing/lake-pier.jpg", emoji: "🎣" },
-  { id: "mountain", name: "산 정상", caption: "등산 끝에 만난 전망대", image: "/healing/fouriesburg-mountain-lookout.jpg", emoji: "⛰️" },
-  { id: "rooftop", name: "옥상 쉼터", caption: "바람 쐬러 올라온 옥상", image: "/healing/rooftop-day.jpg", emoji: "🌤️" },
-  { id: "rooftop-night", name: "밤 옥상", caption: "불빛 보며 한숨 돌리기", image: "/healing/rooftop-night.jpg", emoji: "🌃" },
-  { id: "snow-forest", name: "눈 내린 숲", caption: "고요한 겨울 숲길", image: "/healing/snowy-forest-path-01.jpg", emoji: "❄️" },
+  { id: "beach", name: "바닷가", caption: "파도 소리 들리는 해변", emoji: "🌊" },
+  { id: "fishing", name: "낚시터", caption: "호숫가 잔교에서 낚싯대 드리우기", emoji: "🎣" },
+  { id: "camp", name: "캠핑장", caption: "모닥불 앞에서 멍하니 불멍", emoji: "🔥" },
+  { id: "mountain", name: "산 정상", caption: "등산 끝에 만난 전망대", emoji: "⛰️" },
+  { id: "rooftop", name: "옥상 쉼터", caption: "바람 쐬러 올라온 옥상", emoji: "🌤️" },
+  { id: "snow-forest", name: "눈 내린 숲", caption: "고요한 겨울 숲길", emoji: "❄️" },
 ];
 
-export type HealingActivityId = "laptop" | "fishing" | "walk" | "rest";
+export const YARD_NAME = "쉼터 마당";
+
+export type HealingActivityId = "laptop" | "fishing" | "walk" | "rest" | "smoke" | "hike" | "stargaze" | "snowman" | "campfire";
 
 export interface HealingActivity {
   id: HealingActivityId;
   name: string;
   emoji: string;
-  /** Scenes that allow it; omitted = every scene. */
-  scenes?: readonly HealingSceneId[];
 }
 
+/** Display names; which zone offers which activity comes from healing-world.activitiesInScene. */
 export const HEALING_ACTIVITIES: readonly HealingActivity[] = [
   { id: "laptop", name: "노트북 하기", emoji: "💻" },
-  { id: "fishing", name: "낚시하기", emoji: "🎣", scenes: ["fishing", "beach"] },
-  { id: "walk", name: "산책하기", emoji: "🚶", scenes: ["beach", "mountain", "snow-forest", "fishing"] },
+  { id: "fishing", name: "낚시하기", emoji: "🎣" },
+  { id: "walk", name: "산책하기", emoji: "🚶" },
   { id: "rest", name: "쉬기", emoji: "☕" },
+  { id: "smoke", name: "담배 한 대", emoji: "🚬" },
+  { id: "hike", name: "등산하기", emoji: "🥾" },
+  { id: "stargaze", name: "별 보기", emoji: "🔭" },
+  { id: "snowman", name: "눈사람 만들기", emoji: "⛄" },
+  { id: "campfire", name: "불멍", emoji: "🔥" },
 ];
 
-/** Activities allowed at a scene, in display order. */
-export function activitiesFor(sceneId: HealingSceneId): readonly HealingActivity[] {
-  return HEALING_ACTIVITIES.filter((a) => !a.scenes || a.scenes.includes(sceneId));
+export function findActivity(id: unknown): HealingActivity {
+  return HEALING_ACTIVITIES.find((a) => a.id === id) ?? HEALING_ACTIVITIES[3];
 }
 
 export const HEALING_STATUS = "힐링 타임 중 · 잠시 쉬어요";
@@ -140,9 +146,9 @@ export function weatherEffect(code: number): WeatherEffect {
 
 const EFFECT_LABEL: Record<WeatherEffect, string> = { clear: "맑음", cloudy: "흐림", rain: "비", snow: "눈", fog: "안개" };
 
-// Suggested spot for the current weather; the person can still pick any spot.
+// Suggested spot for the current weather; the person can still walk anywhere.
 export function sceneForWeather(weather: Pick<CurrentWeather, "effect" | "isDay">): HealingSceneId {
-  if (!weather.isDay) return "rooftop-night";
+  if (!weather.isDay) return "camp";
   if (weather.effect === "snow") return "snow-forest";
   if (weather.effect === "rain") return "rooftop";
   if (weather.effect === "fog") return "fishing";
