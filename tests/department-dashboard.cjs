@@ -173,6 +173,13 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     // Escape closes only the inner editor; focus returns to the calendar.
     await page.getByRole("button", { name: "일정 등록", exact: true }).click();
     await dialog.getByLabel("일정명", { exact: true }).fill("닫기 동작 확인");
+    // Another window switches to the garage: the editor portal hides too, and the draft comes back with the team tab.
+    await page.evaluate(() => { localStorage.setItem("teams-hub-view", "garage"); window.dispatchEvent(new StorageEvent("storage", { key: "teams-hub-view" })); });
+    await page.getByTestId("garage").waitFor();
+    await dialog.waitFor({ state: "hidden" });
+    await page.getByTestId("hub-tab-team").click();
+    await dialog.waitFor();
+    assert.equal(await dialog.getByLabel("일정명", { exact: true }).inputValue(), "닫기 동작 확인", "The draft must survive a hidden tab.");
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });
     assert.equal(await calendar.isVisible(), true);
@@ -181,6 +188,13 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
       await page.screenshot({ path: "artifacts/calendar-focus-failure.png", fullPage: true });
       throw error;
     });
+    // Rows changed while I was in the garage appear when I come back.
+    rows = [...rows, { id: "e-away", title: "자리 비운 사이 일정", category: "meeting", starts_on: today, ends_on: today, starts_at: null, location: "", organizer: "", note: "", updated_at: stamp(), deleted_at: null }];
+    await closeCalendar();
+    await calendar.getByRole("button", { name: /자리 비운 사이 일정/ }).first().waitFor({ timeout: 10000 });
+    rows = rows.filter((row) => row.id !== "e-away");
+    await closeCalendar();
+    await calendar.getByRole("button", { name: /자리 비운 사이 일정/ }).first().waitFor({ state: "detached", timeout: 10000 });
     // The signed-in account becomes the author; legacy events remain readable.
     await page.getByRole("button", { name: "일정 등록", exact: true }).click();
     assert.equal(await dialog.getByLabel("유형", { exact: true }).inputValue(), "work");

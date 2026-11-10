@@ -751,7 +751,8 @@ export function DepartmentCalendar({
         </p>
       </div>
       <Dialog
-        open={editor !== null}
+        // Hidden tab closes the portal too; the draft stays in `editor` for the return trip.
+        open={active && editor !== null}
         onOpenChange={(open) => {
           if (!open && !busy) setEditor(null);
         }}
@@ -759,7 +760,7 @@ export function DepartmentCalendar({
         <DialogContent
           className="max-h-[90dvh] overflow-y-auto sm:max-w-lg"
           showCloseButton={!busy}
-          finalFocus={() => editorOpener.current?.isConnected && editorOpener.current.checkVisibility() ? editorOpener.current : createButton.current}
+          finalFocus={() => !active ? false : editorOpener.current?.isConnected && editorOpener.current.checkVisibility() ? editorOpener.current : createButton.current}
         >
           <form onSubmit={submit}>
             <DialogHeader>
