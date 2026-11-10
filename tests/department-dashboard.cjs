@@ -46,6 +46,13 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
         deleted_at: null,
       },
     ];
+    // Project schedules: one live project, one in the trash (must stay hidden).
+    const schedules = [
+      { id: "s1", project_id: "p1", title: "중간보고서 제출", due_date: today, assignee: "김민수", note: null, color: "yellow", done: false, created_at: stamp(), deleted_at: null, projects: { name: "효곡지구 자연재해위험개선지구", code: null, deleted_at: null } },
+      { id: "s3", project_id: "p1", title: "지워진 일정", due_date: today, assignee: null, note: null, color: "blue", done: false, created_at: stamp(), deleted_at: today, projects: { name: "효곡지구 자연재해위험개선지구", code: null, deleted_at: null } },
+      { id: "s2", project_id: "p9", title: "삭제된 과업 마감", due_date: today, assignee: null, note: null, color: "pink", done: false, created_at: stamp(), deleted_at: null, projects: { name: "삭제된 과업", code: null, deleted_at: today } },
+    ];
+    let failDeadlines = false;
     const projects = [
       {
         id: "p1",
@@ -81,6 +88,15 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
         return route.fulfill({ json: projects });
       if (url.pathname.endsWith("/team_members"))
         return route.fulfill({ json: members });
+      if (url.pathname.endsWith("/schedules")) {
+        if (failDeadlines) return route.fulfill({ status: 500, json: { message: "schedules unavailable" } });
+        assert.ok(url.searchParams.get("select")?.includes("projects!inner("), "Deadlines must join live projects on the server.");
+        const due = Object.fromEntries(url.searchParams.getAll("due_date").map((v) => v.split(".")));
+        assert.ok(due.gte && due.lte, "Deadlines must be fetched for the visible range only.");
+        assert.equal(url.searchParams.get("deleted_at"), "is.null");
+        const liveProjectsOnly = url.searchParams.get("projects.deleted_at") === "is.null";
+        return route.fulfill({ json: schedules.filter((row) => !row.deleted_at && row.due_date >= due.gte && row.due_date <= due.lte && (!liveProjectsOnly || !row.projects.deleted_at)) });
+      }
       if (!url.pathname.endsWith("/department_events"))
         return route.fulfill({ json: [] });
       if (missing)
@@ -157,6 +173,41 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await page.getByLabel("과업 검색").fill("");
     await openCalendar();
     await page.getByRole("button", { name: "회의 부서 주간회의", exact: false }).waitFor();
+    // Deadlines of every live project show read-only on the team calendar and link to the project.
+    const deadline = page.locator('a[title^="과업 마감 · 효곡지구 자연재해위험개선지구 · 중간보고서 제출"]');
+    await deadline.first().waitFor();
+    assert.equal(await deadline.first().getAttribute("href"), "/projects/p1");
+    assert.equal(await page.locator('a[title*="삭제된 과업"]').count(), 0, "Deadlines of trashed projects stay hidden.");
+    assert.equal(await page.locator('a[title*="지워진 일정"]').count(), 0, "Soft-deleted schedules stay hidden.");
+    await page.screenshot({ path: "artifacts/calendar-deadlines.png" });
+    await page.getByRole("button", { name: "과업 마감", exact: true }).click();
+    await deadline.first().waitFor();
+    assert.equal(await page.locator('button[title^="회의 ·"]').count(), 0, "The deadline filter hides team events.");
+    await page.getByRole("button", { name: "전체", exact: true }).click();
+    await page.getByRole("button", { name: "내 개인 일정", exact: true }).click();
+    assert.equal(await deadline.count(), 0, "Private scope shows no project deadlines.");
+    await page.getByRole("button", { name: "모든 일정", exact: true }).click();
+    await deadline.first().waitFor();
+    // The creator filter reaches deadlines through the free-text assignee.
+    await page.getByLabel("등록자", { exact: true }).selectOption(members[0].id);
+    await deadline.first().waitFor();
+    await page.getByLabel("등록자", { exact: true }).selectOption(members[1].id);
+    assert.equal(await deadline.count(), 0, "A member without that assignee hides the deadline.");
+    await page.getByLabel("등록자", { exact: true }).selectOption("unassigned");
+    assert.equal(await deadline.count(), 0);
+    await page.getByLabel("등록자", { exact: true }).selectOption("all");
+    await deadline.first().waitFor();
+    // A failing deadline load keeps the team events and says why.
+    failDeadlines = true;
+    await page.getByRole("button", { name: "다음 달", exact: true }).click();
+    await page.getByRole("status").filter({ hasText: "과업 마감을 불러오지 못했습니다 (schedules unavailable)" }).waitFor();
+    assert.equal(await deadline.count(), 0);
+    failDeadlines = false;
+    await page.getByRole("button", { name: "이전 달", exact: true }).click();
+    await deadline.first().waitFor();
+    // Month navigation selects the 1st, so check the cell chip rather than the day panel row.
+    await page.locator('button[title^="회의 · 부서 주간회의 ·"]').waitFor();
+    assert.equal(await page.getByRole("status").filter({ hasText: "과업 마감을 불러오지" }).count(), 0);
     // Switching tabs keeps month, category and author filters.
     await page.getByRole("button", { name: "다음 달", exact: true }).click();
     const viewedMonth = await calendar.getByRole("heading", { name: /^\d{4}\. \d{2}$/ }).textContent();

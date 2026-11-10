@@ -41,6 +41,13 @@ import {
   type EventVisibility,
   type EventCategory,
 } from "@/lib/department-events";
+import {
+  DEADLINE_STYLE,
+  deadlineMatchesCreator,
+  listProjectDeadlines,
+  type ProjectDeadline,
+} from "@/lib/project-deadlines";
+import { DeadlineChip, DeadlineRow } from "@/components/team/deadline-items";
 
 const categories = Object.entries(EVENT_CATEGORIES) as [
   EventCategory,
@@ -101,7 +108,10 @@ export function DepartmentCalendar({
   const [month, setMonth] = useState(() => new Date());
   const [selected, setSelected] = useState(() => dateKey(new Date()));
   const [events, setEvents] = useState<DepartmentEvent[]>([]);
-  const [filter, setFilter] = useState<EventCategory | "all">("all");
+  // Project deadlines are shown read-only next to team events; null = the last load failed.
+  const [deadlines, setDeadlines] = useState<ProjectDeadline[] | null>([]);
+  const [deadlineError, setDeadlineError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<EventCategory | "all" | "deadline">("all");
   const [creatorFilter, setCreatorFilter] = useState("all");
   const [scopeFilter, setScopeFilter] = useState<"all" | EventVisibility>(fixedScope ?? "all");
   const defaultScope = fixedScope ?? "all";
@@ -126,9 +136,21 @@ export function DepartmentCalendar({
   const reload = useCallback(async () => {
     const version = ++requestVersion.current;
     try {
-      const rows = await listDepartmentEvents(first, last);
+      // A deadline failure must not hide the team events, so it is caught on its own.
+      let dueError: string | null = null;
+      const [rows, due] = await Promise.all([
+        listDepartmentEvents(first, last),
+        fixedScope
+          ? Promise.resolve([])
+          : listProjectDeadlines(first, last).catch((err: unknown) => {
+              dueError = message(err);
+              return null;
+            }),
+      ]);
       if (version !== requestVersion.current) return;
       setEvents(rows);
+      setDeadlines(due);
+      setDeadlineError(dueError);
       setLoadedRange(`${first}/${last}`);
       setError(null);
     } catch (err) {
@@ -136,7 +158,7 @@ export function DepartmentCalendar({
     } finally {
       if (version === requestVersion.current) setLoading(false);
     }
-  }, [first, last]);
+  }, [first, last, fixedScope]);
   const reloadCurrentMonth = useRef(reload);
   const activeRef = useRef(active);
   const wasActive = useRef(active);
@@ -184,12 +206,19 @@ export function DepartmentCalendar({
             ? !e.created_by
             : e.created_by === activeCreatorFilter)),
   );
+  const visibleDeadlines =
+    loadedRange === range && (filter === "all" || filter === "deadline") && scopeFilter !== "private"
+      ? (deadlines ?? []).filter((d) =>
+          deadlineMatchesCreator(d, activeCreatorFilter, currentMember?.name, creators.get(activeCreatorFilter)),
+        )
+      : [];
   const dayEvents = visible.filter((e) => occursOn(e, selected));
+  const dayDeadlines = visibleDeadlines.filter((d) => d.due_date === selected);
   const monthCount = currentEvents.filter(
     (e) =>
       (!fixedScope || (e.visibility ?? "team") === fixedScope) &&
       e.starts_on.slice(0, 7) <= monthKey && e.ends_on.slice(0, 7) >= monthKey,
-  ).length;
+  ).length + (deadlines ?? []).filter((d) => d.due_date.slice(0, 7) === monthKey).length;
   const today = dateKey(new Date());
   const isLoading = loading || (!error && loadedRange !== range);
 
@@ -207,7 +236,7 @@ export function DepartmentCalendar({
       input: {
         title: "",
         visibility: scopeFilter === "private" ? "private" : "team",
-        category: filter === "all" ? "work" : filter,
+        category: filter === "all" || filter === "deadline" ? "work" : filter,
         starts_on: day,
         ends_on: day,
         starts_at: null,
@@ -442,7 +471,28 @@ export function DepartmentCalendar({
             {category.label}
           </button>
         ))}
+        {!fixedScope && (
+          <button
+            type="button"
+            aria-pressed={filter === "deadline"}
+            onClick={() => setFilter("deadline")}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs",
+              filter === "deadline"
+                ? DEADLINE_STYLE.className
+                : "border-transparent text-slate-500 hover:bg-slate-50",
+            )}
+          >
+            <span className={cn("size-1.5 rounded-full", DEADLINE_STYLE.dot)} />
+            {DEADLINE_STYLE.label}
+          </button>
+        )}
       </div>
+      {deadlines === null && !error && (
+        <p role="status" className="px-5 pb-2 text-xs text-amber-700 sm:px-6">
+          과업 마감을 불러오지 못했습니다{deadlineError ? ` (${deadlineError})` : ""}. 팀 일정만 표시합니다.
+        </p>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 sm:px-6">
         <div className="flex flex-wrap items-center gap-2">
           {!fixedScope && <div className="flex rounded-lg bg-slate-100 p-0.5" role="group" aria-label="일정 보기 범위">
@@ -549,6 +599,9 @@ export function DepartmentCalendar({
         {cells.map((date, i) => {
           const day = dateKey(date);
           const items = visible.filter((e) => occursOn(e, day));
+          // Deadlines come first in a cell; three lines are shared between both kinds.
+          const due = visibleDeadlines.filter((d) => d.due_date === day);
+          const total = items.length + due.length;
           const inMonth = date.getMonth() === month.getMonth();
           return (
             <div
@@ -584,14 +637,17 @@ export function DepartmentCalendar({
                 >
                   {date.getDate()}
                 </span>
-                {items.length > 0 && (
+                {total > 0 && (
                   <span className="pr-1 text-[10px] text-slate-400 sm:hidden">
-                    {items.length}
+                    {total}
                   </span>
                 )}
               </button>
               <div className="hidden space-y-1 sm:block">
-                {items.slice(0, 3).map((item) => (
+                {due.slice(0, 3).map((deadline) => (
+                  <DeadlineChip key={deadline.id} deadline={deadline} />
+                ))}
+                {items.slice(0, Math.max(0, 3 - due.length)).map((item) => (
                   <button
                     key={item.id}
                     type="button"
@@ -622,18 +678,25 @@ export function DepartmentCalendar({
                     />
                   </button>
                 ))}
-                {items.length > 3 && (
+                {total > 3 && (
                   <button
                     type="button"
                     onClick={() => setSelected(day)}
                     className="px-1 text-[11px] text-teal-700"
                   >
-                    +{items.length - 3}건 더 보기
+                    +{total - 3}건 더 보기
                   </button>
                 )}
               </div>
               <div className="flex min-h-3 flex-wrap gap-1 px-1 pb-1 sm:hidden">
-                {items.slice(0, 5).map((item) => (
+                {due.slice(0, 5).map((deadline) => (
+                  <span
+                    key={deadline.id}
+                    title={`${DEADLINE_STYLE.label} · ${deadline.project_name} · ${deadline.title}`}
+                    className={cn("size-1.5 rounded-full", DEADLINE_STYLE.dot)}
+                  />
+                ))}
+                {items.slice(0, Math.max(0, 5 - due.length)).map((item) => (
                   <span
                     key={item.id}
                     title={`${item.title} · 등록자: ${item.creator_name || "미지정"}`}
@@ -653,7 +716,7 @@ export function DepartmentCalendar({
           <h3 className="text-sm font-semibold text-slate-900">
             {Number(selected.slice(5, 7))}월 {Number(selected.slice(8))}일{" "}
             <span className="ml-1 font-normal text-slate-500">
-              {dayEvents.length}개의 일정
+              {dayEvents.length + dayDeadlines.length}개의 일정
             </span>
           </h3>
           <Button
@@ -674,20 +737,27 @@ export function DepartmentCalendar({
           <p className="py-4 text-center text-sm text-slate-500">
             연결되면 이 날짜의 일정을 표시합니다.
           </p>
-        ) : dayEvents.length === 0 ? (
+        ) : dayEvents.length + dayDeadlines.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-200 py-7 text-center">
             <CalendarDays className="mx-auto mb-2 size-6 text-slate-300" />
             <p className="text-sm text-slate-500">
-              {filter === "all" && activeCreatorFilter === "all"
-                ? "아직 등록된 일정이 없어요."
-                : "선택한 유형·등록자의 일정이 없어요."}
+              {filter === "deadline"
+                ? "이 날짜에 마감인 과업 일정이 없어요."
+                : filter === "all" && activeCreatorFilter === "all"
+                  ? "아직 등록된 일정이 없어요."
+                  : "선택한 유형·등록자의 일정이 없어요."}
             </p>
             <p className="mt-1 text-xs text-slate-400">
-              부서원과 함께할 첫 일정을 남겨 보세요.
+              {filter === "deadline"
+                ? "과업 일정은 각 과업 안에서 등록합니다."
+                : "부서원과 함께할 첫 일정을 남겨 보세요."}
             </p>
           </div>
         ) : (
           <div className="space-y-2">
+            {dayDeadlines.map((deadline) => (
+              <DeadlineRow key={deadline.id} deadline={deadline} />
+            ))}
             {dayEvents.map((item) => (
               <button
                 type="button"
