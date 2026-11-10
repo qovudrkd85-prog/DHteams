@@ -106,6 +106,50 @@ export function projectTone(projectId: string): (typeof PROJECT_TONES)[number] {
   return PROJECT_TONES[hash % PROJECT_TONES.length];
 }
 
+export type ProjectTone = (typeof PROJECT_TONES)[number];
+
+/**
+ * Colours for a set of projects without clashes: each id starts at its hash colour and, when taken,
+ * moves to the next free one. Ids are sorted first, so the same set always gives the same colours
+ * (whatever order it came in). Past eight projects the palette starts over.
+ */
+export function projectToneMap(projectIds: Iterable<string>): Map<string, ProjectTone> {
+  const ids = Array.from(new Set(projectIds)).sort();
+  const map = new Map<string, ProjectTone>();
+  let used = new Set<number>();
+  for (const id of ids) {
+    if (used.size === PROJECT_TONES.length) used = new Set();
+    let index = PROJECT_TONES.indexOf(projectTone(id));
+    while (used.has(index)) index = (index + 1) % PROJECT_TONES.length;
+    used.add(index);
+    map.set(id, PROJECT_TONES[index]);
+  }
+  return map;
+}
+
+/** The project's colour from `map`, or its plain hash colour when the map does not know it. */
+export function toneFor(map: ReadonlyMap<string, ProjectTone> | undefined, projectId: string): ProjectTone {
+  return map?.get(projectId) ?? projectTone(projectId);
+}
+
+export interface ProjectDeadlineGroup {
+  project_id: string;
+  project_name: string;
+  deadlines: ProjectDeadline[];
+}
+
+/** Deadlines grouped per project, each group in date order; groups ordered by their earliest date. */
+export function groupDeadlinesByProject(deadlines: readonly ProjectDeadline[]): ProjectDeadlineGroup[] {
+  const sorted = [...deadlines].sort((a, b) => a.due_date.localeCompare(b.due_date));
+  const groups = new Map<string, ProjectDeadlineGroup>();
+  for (const deadline of sorted) {
+    const group = groups.get(deadline.project_id);
+    if (group) group.deadlines.push(deadline);
+    else groups.set(deadline.project_id, { project_id: deadline.project_id, project_name: deadline.project_name, deadlines: [deadline] });
+  }
+  return Array.from(groups.values());
+}
+
 /** Whole days from `today` to `due` (both YYYY-MM-DD); negative when overdue. */
 export function daysUntil(due: string, today: string): number {
   const toUtc = (key: string) => {
