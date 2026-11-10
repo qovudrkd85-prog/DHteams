@@ -88,12 +88,15 @@ export function DepartmentCalendar({
   currentMember = null,
   onRegister,
   fixedScope,
+  active = true,
 }: {
   members?: TeamMember[];
   currentMember?: TeamMember | null;
   onRegister?: () => void;
   /** Lock the calendar to one scope (garage shows only my private events). */
   fixedScope?: "private";
+  /** False while kept mounted but hidden (keeps month/filters); polling pauses and it reloads on return. */
+  active?: boolean;
 }) {
   const [month, setMonth] = useState(() => new Date());
   const [selected, setSelected] = useState(() => dateKey(new Date()));
@@ -135,12 +138,21 @@ export function DepartmentCalendar({
     }
   }, [first, last]);
   const reloadCurrentMonth = useRef(reload);
+  const activeRef = useRef(active);
+  const wasActive = useRef(active);
+
+  useEffect(() => {
+    activeRef.current = active;
+    // Back from another tab: events may have changed there (e.g. private events in the garage).
+    if (active && !wasActive.current) void reloadCurrentMonth.current();
+    wasActive.current = active;
+  }, [active]);
 
   useEffect(() => {
     reloadCurrentMonth.current = reload;
     void reload();
     const refresh = () => {
-      if (document.visibilityState === "visible") void reload();
+      if (document.visibilityState === "visible" && activeRef.current) void reload();
     };
     const timer = window.setInterval(refresh, 30000);
     window.addEventListener("focus", refresh);

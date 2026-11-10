@@ -196,15 +196,16 @@ export default function HomePage() {
         <div className="mb-5"><HubTabs view={view} onChange={changeView} /></div>
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="min-w-0 space-y-5">
-            {view === "team" ? (
-              <section className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:p-5" aria-label="우리 팀 달력" data-testid="team-calendar-inline">
-                <DepartmentCalendar
-                  members={workspace.members}
-                  currentMember={workspace.error ? null : workspace.currentMember}
-                  onRegister={() => workspace.setProfileOpen(true)}
-                />
-              </section>
-            ) : (
+            {/* Kept mounted while hidden so month and filters survive a trip to the garage. */}
+            <section hidden={view !== "team"} className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:p-5" aria-label="우리 팀 달력" data-testid="team-calendar-inline">
+              <DepartmentCalendar
+                members={workspace.members}
+                currentMember={workspace.error ? null : workspace.currentMember}
+                onRegister={() => workspace.setProfileOpen(true)}
+                active={view === "team"}
+              />
+            </section>
+            {view === "garage" && (
               <Garage workspace={workspace} healing={healing} onHealingEnd={() => { setHealing(false); setHealingEnded(true); }} />
             )}
           </div>
