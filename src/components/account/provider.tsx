@@ -27,8 +27,8 @@ export type TeamActionInput =
   | { action: "create"; name: string }
   | { action: "join"; code: string }
   | { action: "switch"; teamId: string }
-  | { action: "leave" }
-  | { action: "regenerate" };
+  | { action: "leave"; expectedTeamId?: string }
+  | { action: "regenerate"; expectedTeamId?: string };
 
 const AccountContext = createContext<AccountContextValue | null>(null);
 const connectionError = "서버에 연결하지 못했습니다. 연결을 확인하고 다시 시도해 주세요.";
@@ -74,7 +74,9 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
         if (data.configured === false) setAccount(null);
         return;
       }
-      setAccount(data.authenticated && data.account ? data.account : null);
+      const next = data.authenticated && data.account ? data.account : null;
+      setScreenTeam(next?.team?.id ?? null);
+      setAccount(next);
       setError(data.error || null);
     }).catch((cause: unknown) => {
       if (request === version.current) setError(cause instanceof Error ? cause.message : connectionError);
@@ -134,6 +136,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
         throw new Error("로그인 정보를 확인하지 못했습니다. 다시 로그인해 주세요.");
       }
       if (data.account) {
+        setScreenTeam(data.account.team?.id ?? null);
         setAccount(data.account);
         setConfigured(true);
       }

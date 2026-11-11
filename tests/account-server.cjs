@@ -81,6 +81,11 @@ async function fakeSupabase() {
         if (state.teamRpcError) return send(400, state.teamRpcError);
         const rpcName = url.pathname.slice(13);
         const memberId = account.member.id;
+        // check_screen_team(): leave / rotation from a screen showing another team is refused.
+        const screenTeam = request.headers["x-teams-team"];
+        if (["leave_team", "regenerate_team_code"].includes(rpcName) && screenTeam && screenTeam !== account.member.team_id) {
+          return send(403, { code: "42501", message: "다른 기기에서 팀을 바꿨습니다. 새로고침한 뒤 다시 시도해 주세요." });
+        }
         if (rpcName === "create_team") {
           const team = { id: randomUUID(), name: body.p_name, invite_code: state.teams.size ? `K7QM3XP${"BCDEFGH"[state.teams.size]}` : "K7QM3XPA", created_by: memberId };
           state.teams.set(team.id, team);
@@ -399,8 +404,14 @@ function client(baseURL) {
     upstream.state.memberships = upstream.state.memberships.filter((row) => row.member_id !== bob.member.id);
     assert.equal((await browser.request("/api/session")).data.account.team.can_rotate_code, true, "nobody owns the team: anyone may rotate");
     aliceInA.role = "owner";
+    // Stale screen (shows B, active is A): leave is refused and nothing changes; malformed team id never reaches upstream.
+    assert.equal((await browser.request("/api/team", { method: "POST", body: { action: "leave", expectedTeamId: "x" } })).status, 400);
+    const staleLeave = await browser.request("/api/team", { method: "POST", body: { action: "leave", expectedTeamId: teamB.id } });
+    assert.equal(staleLeave.status, 403);
+    assert.equal(upstream.state.calls.findLast((call) => call.path === "/rest/v1/rpc/leave_team").headers["x-teams-team"], teamB.id);
+    assert.equal(upstream.state.memberships.filter((row) => row.member_id === alice.member.id).length, 2);
     // Leaving the active team moves to the remaining one.
-    const leftA = await browser.request("/api/team", { method: "POST", body: { action: "leave" } });
+    const leftA = await browser.request("/api/team", { method: "POST", body: { action: "leave", expectedTeamId: teamA.id } });
     assert.equal(leftA.data.account.team.id, teamB.id);
     assert.deepEqual(leftA.data.account.teams.map((team) => team.id), [teamB.id]);
     // Database without the memberships SQL: the active team still loads, listed alone.
@@ -436,8 +447,9 @@ function client(baseURL) {
     const teamHeaderCall = upstream.state.calls.findLast((call) => call.path === "/rest/v1/projects");
     assert.equal(teamHeaderCall.headers["x-teams-team"], screenTeam);
     assert.equal(teamHeaderCall.headers["x-other"], undefined);
-    await browser.request("/api/db/rest/v1/projects?select=*", { headers: { "x-teams-team": "not-a-uuid" } });
-    assert.equal(upstream.state.calls.findLast((call) => call.path === "/rest/v1/projects").headers["x-teams-team"], undefined);
+    const beforeJunk = upstream.state.calls.length;
+    assert.equal((await browser.request("/api/db/rest/v1/projects?select=*", { headers: { "x-teams-team": "not-a-uuid" } })).status, 400);
+    assert.equal(upstream.state.calls.length, beforeJunk, "malformed team header is refused before any upstream call");
     const presence = await browser.request("/api/db/rest/v1/team_presence?select=*", { headers: { Authorization: "Bearer spoofed-user-token" } });
     assert.equal(presence.status, 200);
     assert.equal(presence.data[0].member_id, alice.member.id);

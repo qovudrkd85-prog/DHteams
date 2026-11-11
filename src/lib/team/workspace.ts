@@ -126,11 +126,14 @@ export async function checkIn(memberId: string): Promise<Attendance> {
   const client = createClient();
   // The database chooses the date/time and ignores an overlapping check-in atomically.
   // A second attempt also covers midnight passing between the insert and read.
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  // team_id is stamped by the database from the active team (one row per person, team and day).
+  // 42P10 = no such key: database still on the one-team key (memberships SQL not applied or rolled back).
+  let conflictKey = "member_id,team_id,work_date";
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     const { data, error } = await client.from("team_attendance")
-      // team_id is stamped by the database from the active team (one row per person, team and day).
-      .upsert({ member_id: memberId }, { onConflict: "member_id,team_id,work_date", ignoreDuplicates: true })
+      .upsert({ member_id: memberId }, { onConflict: conflictKey, ignoreDuplicates: true })
       .select().maybeSingle();
+    if (error?.code === "42P10" && conflictKey !== "member_id,work_date") { conflictKey = "member_id,work_date"; continue; }
     if (error) throw databaseError(error);
     if (data) return data as Attendance;
     const { data: existing, error: readError } = await client.from("team_attendance").select("*")

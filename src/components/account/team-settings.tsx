@@ -25,7 +25,7 @@ export function TeamSettings({ team, busy, setBusy }: TeamSettingsProps) {
     setBusy(true);
     setError(null);
     try {
-      await teamAction({ action });
+      await teamAction({ action, expectedTeamId: team.id });
       if (action === "leave") {
         setSettingsOpen(false);
         toast.success(otherTeams > 0

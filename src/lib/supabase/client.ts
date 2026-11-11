@@ -4,6 +4,7 @@ import { createClient as createSupabaseClient, type SupabaseClient } from "@supa
 export const isSupabaseConfigured = true;
 let client: SupabaseClient | undefined;
 let screenTeamId: string | null = null;
+let lastTeamCheck = 0;
 
 /** The team this screen shows; sent with every data request so a stale screen cannot write into another team. */
 export function setScreenTeam(teamId: string | null): void {
@@ -22,7 +23,10 @@ export function createClient(): SupabaseClient {
           const response = await fetch(input, { ...init, headers, credentials: "same-origin", cache: "no-store" });
           if (response.status === 401) window.dispatchEvent(new Event("teams:session-expired"));
           // 403 = refused by team rules, usually because another device switched teams: reload the session.
-          if (response.status === 403) window.dispatchEvent(new Event("teams:team-check"));
+          if (response.status === 403 && Date.now() - lastTeamCheck > 3000) {
+            lastTeamCheck = Date.now();
+            window.dispatchEvent(new Event("teams:team-check"));
+          }
           return response;
         },
       },

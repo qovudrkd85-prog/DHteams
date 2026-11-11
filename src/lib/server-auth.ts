@@ -127,37 +127,39 @@ export function createAuthContext(request: NextRequest) {
     const teamFailure = () => new AccountError("팀 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
     let team: TeamSpace | null = null;
     let teams: TeamSummary[] = [];
-    // Memberships (several teams per person). Missing table = memberships SQL not installed yet.
-    const { data: memberships, error: membershipError } = await supabase.from("team_memberships")
-      .select("team_id,role").eq("member_id", member.id).order("joined_at");
+    // Round 1 (parallel): my memberships + the active team. Missing memberships table = SQL not installed yet.
+    const [membershipResult, activeResult] = await Promise.all([
+      supabase.from("team_memberships").select("team_id,role").eq("member_id", member.id).order("joined_at"),
+      member.team_id
+        ? supabase.from("teams").select("id,name,invite_code,created_by").eq("id", member.team_id).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+    const membershipError = membershipResult.error;
     const legacy = Boolean(membershipError && ["PGRST205", "42P01"].includes(membershipError.code));
-    if (membershipError && !legacy) throw teamFailure();
-    const roles = new Map((memberships ?? []).map((row: { team_id: string; role: string }) => [row.team_id, row.role]));
-    if (member.team_id) {
-      const { data: row, error: teamError } = await supabase.from("teams").select("id,name,invite_code,created_by").eq("id", member.team_id).maybeSingle();
-      if (teamError) throw teamFailure();
-      if (row) {
-        const isOwner = legacy ? row.created_by === member.id : roles.get(row.id) === "owner";
-        let canRotate = isOwner;
-        if (!isOwner) {
-          // Mirrors regenerate_team_code(): anyone may rotate when the team has no owner.
-          const { data: owner, error: ownerError } = legacy
-            ? (row.created_by
-              ? await supabase.from("team_members").select("id").eq("id", row.created_by).eq("team_id", row.id).maybeSingle()
-              : { data: null, error: null })
-            : await supabase.from("team_memberships").select("member_id").eq("team_id", row.id).eq("role", "owner").limit(1).maybeSingle();
-          if (ownerError) throw teamFailure();
-          canRotate = !owner;
-        }
-        team = { id: row.id, name: row.name, invite_code: row.invite_code, is_owner: isOwner, can_rotate_code: canRotate };
-      }
+    if ((membershipError && !legacy) || activeResult.error) throw teamFailure();
+    const roles = new Map((membershipResult.data ?? []).map((row: { team_id: string; role: string }) => [row.team_id, row.role]));
+    const row = activeResult.data as { id: string; name: string; invite_code: string; created_by: string | null } | null;
+    const isOwner = row ? (legacy ? row.created_by === member.id : roles.get(row.id) === "owner") : false;
+    // Round 2 (parallel): is there any owner (rotation rule of regenerate_team_code) + names of all my teams.
+    const [ownerResult, listResult] = await Promise.all([
+      !row || isOwner ? Promise.resolve({ data: null, error: null })
+        : legacy
+          ? (row.created_by
+            ? supabase.from("team_members").select("id").eq("id", row.created_by).eq("team_id", row.id).maybeSingle()
+            : Promise.resolve({ data: null, error: null }))
+          : supabase.from("team_memberships").select("member_id").eq("team_id", row.id).eq("role", "owner").limit(1).maybeSingle(),
+      !legacy && roles.size
+        ? supabase.from("teams").select("id,name").in("id", [...roles.keys()])
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (ownerResult.error || listResult.error) throw teamFailure();
+    if (row) {
+      team = { id: row.id, name: row.name, invite_code: row.invite_code, is_owner: isOwner, can_rotate_code: isOwner || !ownerResult.data };
     }
     if (legacy) {
       teams = team ? [{ id: team.id, name: team.name, is_owner: team.is_owner }] : [];
-    } else if (roles.size) {
-      const { data: rows, error: listError } = await supabase.from("teams").select("id,name").in("id", [...roles.keys()]);
-      if (listError) throw teamFailure();
-      const names = new Map((rows ?? []).map((row: { id: string; name: string }) => [row.id, row.name]));
+    } else {
+      const names = new Map(((listResult.data ?? []) as { id: string; name: string }[]).map((item) => [item.id, item.name]));
       teams = [...roles].filter(([id]) => names.has(id))
         .map(([id, role]) => ({ id, name: names.get(id) as string, is_owner: role === "owner" }));
     }

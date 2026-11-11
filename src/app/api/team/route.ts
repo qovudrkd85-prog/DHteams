@@ -37,12 +37,16 @@ export async function POST(request: NextRequest) {
     await auth.getAccount();
     const body = await readJson(request);
     const action = readAction(body.action);
+    // Leave and code rotation act on the active team: send the team on screen so a stale screen is refused.
+    const screenTeam = body.expectedTeamId === undefined ? null : readTeamId(body.expectedTeamId);
+    const guarded = <T extends { setHeader: (name: string, value: string) => T }>(builder: T): T =>
+      screenTeam ? builder.setHeader("x-teams-team", screenTeam) : builder;
     const call =
       action === "create" ? auth.supabase.rpc("create_team", { p_name: readName(body.name) })
         : action === "join" ? auth.supabase.rpc("join_team", { p_code: readCode(body.code) })
           : action === "switch" ? auth.supabase.rpc("switch_team", { p_team: readTeamId(body.teamId) })
-            : action === "leave" ? auth.supabase.rpc("leave_team")
-              : auth.supabase.rpc("regenerate_team_code");
+            : action === "leave" ? guarded(auth.supabase.rpc("leave_team"))
+              : guarded(auth.supabase.rpc("regenerate_team_code"));
     const { error } = await call;
     if (error) {
       if (["PGRST202", "42883", "42703", "42P01"].includes(error.code)) {

@@ -17,6 +17,8 @@ async function handle(request: NextRequest, path: string[]) {
   for (const header of ["accept-profile", "content-profile"]) {
     if (request.headers.has(header) && request.headers.get(header) !== "public") return jsonError("지원하지 않는 데이터 영역입니다.", 403);
   }
+  const screenTeam = request.headers.get(TEAM_HEADER);
+  if (screenTeam !== null && !uuidPattern.test(screenTeam)) return jsonError("화면의 팀 정보를 확인하지 못했습니다. 새로고침해 주세요.", 400);
   let auth: ReturnType<typeof createAuthContext> | undefined;
   try {
     auth = createAuthContext(request);
@@ -34,8 +36,7 @@ async function handle(request: NextRequest, path: string[]) {
       const value = request.headers.get(name);
       if (value) headers.set(name, value);
     });
-    const screenTeam = request.headers.get(TEAM_HEADER);
-    if (screenTeam && uuidPattern.test(screenTeam)) headers.set(TEAM_HEADER, screenTeam.toLowerCase());
+    if (screenTeam) headers.set(TEAM_HEADER, screenTeam.toLowerCase());
     const raw = ["GET", "HEAD"].includes(request.method) ? "" : await request.text();
     const upstream = await fetch(`${auth.config.url}/rest/v1/${path[2]}${request.nextUrl.search}`, {
       method: request.method, headers, body: raw || undefined, cache: "no-store", redirect: "error",
