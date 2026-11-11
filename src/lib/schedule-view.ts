@@ -38,3 +38,23 @@ export function splitMonthItems<T extends ScheduleViewItem>(
 export function isOverdue(item: ScheduleViewItem, today: string): boolean {
   return !item.done && item.due_date < today;
 }
+
+/** Background refresh only while the page is visible, no dialog is open and no write is in flight. */
+export function shouldRefreshSchedules(state: {
+  visible: boolean;
+  editing: boolean;
+  mutating: number;
+}): boolean {
+  return state.visible && !state.editing && state.mutating === 0;
+}
+
+const SAME_KEYS = ["id", "title", "due_date", "assignee", "note", "color", "done"] as const;
+type ComparableSchedule = { [K in (typeof SAME_KEYS)[number]]: unknown };
+
+/** True when both lists hold the same rows in the same order (shown fields only). */
+export function sameSchedules(a: readonly ComparableSchedule[], b: readonly ComparableSchedule[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((row, i) => SAME_KEYS.every((key) => row[key] === b[i][key]))
+  );
+}

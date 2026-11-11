@@ -42,6 +42,7 @@ const deferred = () => {
     let nextLoad = null;
     let failSave = false;
     let failLogs = false;
+    let scheduleGets = 0;
     await context.route("**/*", (route) => {
       const url = new URL(route.request().url());
       return url.origin === new URL(baseURL).origin ? route.continue() : route.abort();
@@ -74,6 +75,7 @@ const deferred = () => {
           Object.assign(row, body);
           return route.fulfill({ json: row });
         }
+        scheduleGets++;
         return route.fulfill({ json: schedules.filter((row) => Boolean(row.deleted_at) === deleted) });
       }
       if (table === "project_memos") {
@@ -152,6 +154,36 @@ const deferred = () => {
     await monthTodo.getByRole("button", { name: "완료 1건 숨기기", exact: true }).click();
     await monthTodo.getByRole("button", { name: "완료 1건 보기", exact: true }).waitFor();
 
+    // A teammate's new schedule appears on window focus without a page reload.
+    const fireFocus = () => page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    const peerDay = `${month}-${today.slice(8) === "28" ? "27" : "28"}`;
+    const peerCell = page.locator(`[data-day="${peerDay}"]`);
+    const peer = { id: "peer1", project_id: "p1", title: "동료가 추가한 일정", due_date: peerDay, assignee: "박동료", note: null, color: "pink", done: false, created_at: today, deleted_at: null };
+    schedules.push(peer);
+    await fireFocus();
+    await peerCell.getByRole("button", { name: "동료가 추가한 일정", exact: true }).waitFor();
+    // An open edit dialog blocks the refresh: typed text and the dialog stay.
+    await todayCell.getByRole("button", { name: "오늘 일정 1", exact: true }).click();
+    const editDialog = page.getByRole("dialog");
+    const editTitle = editDialog.getByLabel("할 일", { exact: true });
+    await editTitle.fill("입력 중인 제목");
+    peer.title = "동료가 고친 일정";
+    const getsBefore = scheduleGets;
+    await fireFocus();
+    await page.waitForTimeout(500);
+    assert.equal(scheduleGets, getsBefore, "No background reload while the edit dialog is open.");
+    assert.equal(await editTitle.inputValue(), "입력 중인 제목");
+    assert.equal(await editDialog.isVisible(), true);
+    await page.keyboard.press("Escape");
+    await editDialog.waitFor({ state: "hidden" });
+    assert.equal(schedules.find((s) => s.id === "t1").title, "오늘 일정 1", "Closing without saving writes nothing.");
+    // Remove the pushed row so later calendar assertions see the original data.
+    schedules.splice(schedules.indexOf(peer), 1);
+    await fireFocus();
+    await peerCell.getByRole("button", { name: "동료가 고친 일정", exact: true }).waitFor({ state: "hidden" });
+    await peerCell.getByRole("button", { name: "동료가 추가한 일정", exact: true }).waitFor({ state: "hidden" });
+    assert.equal(await todayCell.getByRole("checkbox").count(), 3);
+
     // Leaving before the debounce expires saves the original month. The next
     // month stays empty and disabled until its own data arrives.
     const firstSave = deferred();
@@ -211,7 +243,7 @@ const deferred = () => {
     await actor.waitFor();
     assert.equal(await actor.inputValue(), "", "A reloaded log keeps the cleared actor.");
     assert.deepEqual(errors, []);
-    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold.");
+    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing.");
   } finally {
     await browser.close();
   }

@@ -59,4 +59,20 @@ assert.equal(sv.isOverdue(item("o3", today), today), false);
 assert.equal(sv.isOverdue(item("o4", "2026-11-12"), today), false);
 assert.equal(sv.isOverdue(item("o5", "2025-12-31"), today), true);
 
-console.log("PASS: capCell cap/hidden count, splitMonthItems open-by-date and done, isOverdue only for past not-done items.");
+// shouldRefreshSchedules: visible page, no open dialog, no write in flight.
+assert.equal(sv.shouldRefreshSchedules({ visible: true, editing: false, mutating: 0 }), true);
+assert.equal(sv.shouldRefreshSchedules({ visible: false, editing: false, mutating: 0 }), false);
+assert.equal(sv.shouldRefreshSchedules({ visible: true, editing: true, mutating: 0 }), false);
+assert.equal(sv.shouldRefreshSchedules({ visible: true, editing: false, mutating: 1 }), false);
+
+// sameSchedules: equal shown fields in the same order; any change or reorder differs.
+const row = (id, extra = {}) => ({ id, title: "t", due_date: today, assignee: null, note: null, color: "yellow", done: false, created_at: "x", ...extra });
+assert.equal(sv.sameSchedules([row("a"), row("b")], [row("a"), row("b", { created_at: "y" })]), true);
+assert.equal(sv.sameSchedules([], []), true);
+assert.equal(sv.sameSchedules([row("a")], [row("a"), row("b")]), false);
+assert.equal(sv.sameSchedules([row("a"), row("b")], [row("b"), row("a")]), false);
+for (const [key, value] of [["title", "u"], ["due_date", "2026-11-12"], ["assignee", "김"], ["note", "n"], ["color", "pink"], ["done", true]]) {
+  assert.equal(sv.sameSchedules([row("a")], [row("a", { [key]: value })]), false, `${key} change must count.`);
+}
+
+console.log("PASS: capCell cap/hidden count, splitMonthItems open-by-date and done, isOverdue only for past not-done items, shouldRefreshSchedules gate, sameSchedules field/order compare.");

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { CalendarDays, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { MonthMemo } from "@/components/month-memo";
@@ -19,13 +19,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import * as api from "@/lib/queries";
-import { capCell, isOverdue, splitMonthItems } from "@/lib/schedule-view";
+import {
+  capCell,
+  isOverdue,
+  sameSchedules,
+  shouldRefreshSchedules,
+  splitMonthItems,
+} from "@/lib/schedule-view";
 import { STICKY_COLORS, type Schedule, type StickyColor } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const DAY_CELL_LIMIT = 3;
 const MONTH_TODO_LIMIT = 12;
+const REFRESH_MS = 30000;
 
 const COLOR_CLASS: Record<StickyColor, string> = {
   yellow: "bg-yellow-100 border-yellow-300 text-yellow-950",
@@ -95,12 +102,26 @@ export function ScheduleCalendar({
   const [showAllTodo, setShowAllTodo] = useState(false);
   const [showDone, setShowDone] = useState(false);
 
+  // Request number: a late response from an older load is dropped.
+  const version = useRef(0);
+  // Writes in flight; background refresh waits so it cannot undo an optimistic change.
+  const mutating = useRef(0);
+  const editing = useRef(false);
+  useEffect(() => {
+    editing.current = edit !== null;
+  }, [edit]);
+
   const reload = useCallback(
-    () =>
-      api
+    (background = false) => {
+      const mine = ++version.current;
+      return api
         .listSchedules(projectId)
-        .then(setSchedules)
+        .then((rows) => {
+          if (mine !== version.current) return;
+          setSchedules((prev) => (sameSchedules(prev, rows) ? prev : rows));
+        })
         .catch((error) => {
+          if (background || mine !== version.current) return;
           toast.error(
             errorMessage(
               error,
@@ -109,14 +130,37 @@ export function ScheduleCalendar({
           );
         })
         .finally(() => {
-          setLoading(false);
-        }),
+          if (mine === version.current) setLoading(false);
+        });
+    },
     [projectId],
   );
 
   useEffect(() => {
     void reload();
   }, [reload, refreshKey]);
+
+  // Teammates' schedules arrive without a page reload: every 30s and on focus.
+  useEffect(() => {
+    const versionRef = version;
+    const onVisible = () => {
+      const ok = shouldRefreshSchedules({
+        visible: document.visibilityState === "visible",
+        editing: editing.current,
+        mutating: mutating.current,
+      });
+      if (ok) void reload(true);
+    };
+    const timer = window.setInterval(onVisible, REFRESH_MS);
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      versionRef.current++;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [reload]);
 
   const cells = useMemo(() => buildMonthCells(month), [month]);
 
@@ -141,6 +185,7 @@ export function ScheduleCalendar({
     event.preventDefault();
     if (!edit || !edit.title.trim()) return;
 
+    mutating.current++;
     try {
       if (edit.mode === "create") {
         const created = await api.createSchedule(projectId, {
@@ -165,11 +210,14 @@ export function ScheduleCalendar({
       setEdit(null);
     } catch (error) {
       toast.error(errorMessage(error, "저장하지 못했습니다."));
+    } finally {
+      mutating.current--;
     }
   }
 
   async function toggleDone(schedule: Schedule) {
     const next = !schedule.done;
+    mutating.current++;
     setSchedules((prev) =>
       prev.map((s) => (s.id === schedule.id ? { ...s, done: next } : s)),
     );
@@ -180,21 +228,33 @@ export function ScheduleCalendar({
         prev.map((s) => (s.id === schedule.id ? { ...s, done: !next } : s)),
       );
       toast.error(errorMessage(error, "저장하지 못했습니다."));
+    } finally {
+      mutating.current--;
     }
   }
 
   async function remove(schedule: Schedule) {
+    mutating.current++;
     try {
       await api.deleteSchedule(schedule.id);
       setSchedules((prev) => prev.filter((s) => s.id !== schedule.id));
       setEdit(null);
     } catch (error) {
       toast.error(errorMessage(error, "삭제하지 못했습니다."));
+    } finally {
+      mutating.current--;
     }
   }
 
-  const shiftMonth = (delta: number) => {
+  // Fold state belongs to one month; a new month starts folded.
+  const resetFolds = () => {
     setExpandedDay(null);
+    setShowAllTodo(false);
+    setShowDone(false);
+  };
+
+  const shiftMonth = (delta: number) => {
+    resetFolds();
     setMonth(
       (prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1),
     );
@@ -308,7 +368,7 @@ export function ScheduleCalendar({
           variant="outline"
           size="sm"
           onClick={() => {
-            setExpandedDay(null);
+            resetFolds();
             setMonth(new Date());
           }}
         >
@@ -430,6 +490,9 @@ export function ScheduleCalendar({
           );
         })}
       </div>
+      <p className="-mt-2 text-right text-[11px] text-slate-400">
+        함께 쓰는 일정 · 30초마다 자동 갱신
+      </p>
 
       <MonthMemo projectId={projectId} month={monthKey} />
 
