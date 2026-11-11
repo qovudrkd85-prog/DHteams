@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import type { AccountIdentity, ProfileInput, SessionPayload, TeamSpace } from "@/lib/account/types";
+import type { AccountIdentity, ProfileInput, SessionPayload, TeamSpace, TeamSummary } from "@/lib/account/types";
 import type { TeamMember } from "@/lib/team/workspace";
 
 export const SESSION_COOKIE = "teams_sid";
@@ -124,25 +124,44 @@ export function createAuthContext(request: NextRequest) {
     }
     const { data: member, error: profileError } = await supabase.from("team_members").select("id,user_id,username,name,role,avatar,color,status_message,profile_completed,created_at,team_id").eq("user_id", data.user.id).maybeSingle();
     if (profileError || !member?.username) throw new AccountError("계정 프로필을 불러오지 못했습니다. 계정·팀 SQL 설치 상태를 확인해 주세요.", 503);
+    const teamFailure = () => new AccountError("팀 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
     let team: TeamSpace | null = null;
+    let teams: TeamSummary[] = [];
+    // Memberships (several teams per person). Missing table = memberships SQL not installed yet.
+    const { data: memberships, error: membershipError } = await supabase.from("team_memberships")
+      .select("team_id,role").eq("member_id", member.id).order("joined_at");
+    const legacy = Boolean(membershipError && ["PGRST205", "42P01"].includes(membershipError.code));
+    if (membershipError && !legacy) throw teamFailure();
+    const roles = new Map((memberships ?? []).map((row: { team_id: string; role: string }) => [row.team_id, row.role]));
     if (member.team_id) {
       const { data: row, error: teamError } = await supabase.from("teams").select("id,name,invite_code,created_by").eq("id", member.team_id).maybeSingle();
-      if (teamError) throw new AccountError("팀 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
+      if (teamError) throw teamFailure();
       if (row) {
-        const isOwner = row.created_by === member.id;
+        const isOwner = legacy ? row.created_by === member.id : roles.get(row.id) === "owner";
         let canRotate = isOwner;
         if (!isOwner) {
-          // Mirrors regenerate_team_code(): anyone may rotate once the creator has left the team.
-          const { data: creator, error: creatorError } = row.created_by
-            ? await supabase.from("team_members").select("id").eq("id", row.created_by).eq("team_id", row.id).maybeSingle()
-            : { data: null, error: null };
-          if (creatorError) throw new AccountError("팀 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", 503);
-          canRotate = !creator;
+          // Mirrors regenerate_team_code(): anyone may rotate when the team has no owner.
+          const { data: owner, error: ownerError } = legacy
+            ? (row.created_by
+              ? await supabase.from("team_members").select("id").eq("id", row.created_by).eq("team_id", row.id).maybeSingle()
+              : { data: null, error: null })
+            : await supabase.from("team_memberships").select("member_id").eq("team_id", row.id).eq("role", "owner").limit(1).maybeSingle();
+          if (ownerError) throw teamFailure();
+          canRotate = !owner;
         }
         team = { id: row.id, name: row.name, invite_code: row.invite_code, is_owner: isOwner, can_rotate_code: canRotate };
       }
     }
-    return { id: data.user.id, username: member.username, member: member as TeamMember, team };
+    if (legacy) {
+      teams = team ? [{ id: team.id, name: team.name, is_owner: team.is_owner }] : [];
+    } else if (roles.size) {
+      const { data: rows, error: listError } = await supabase.from("teams").select("id,name").in("id", [...roles.keys()]);
+      if (listError) throw teamFailure();
+      const names = new Map((rows ?? []).map((row: { id: string; name: string }) => [row.id, row.name]));
+      teams = [...roles].filter(([id]) => names.has(id))
+        .map(([id, role]) => ({ id, name: names.get(id) as string, is_owner: role === "owner" }));
+    }
+    return { id: data.user.id, username: member.username, member: member as TeamMember, team, teams };
   };
   return { supabase, config, getAccount, applyCookies, clearSessionCookies };
 }

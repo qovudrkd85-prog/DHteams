@@ -24,7 +24,11 @@ async function installAccountMock(context, { members = [], authenticated = true 
     expire() { current = null; },
   };
   // Browser fixtures start inside a team so pages render past the team gate.
-  const identity = () => current ? { id: current.id, username: current.username, member: current.member, team: state.team } : null;
+  const summary = (team) => ({ id: team.id, name: team.name, is_owner: team.is_owner });
+  const identity = () => current ? {
+    id: current.id, username: current.username, member: current.member, team: state.team,
+    teams: state.team ? [state.team, ...(state.otherTeams ?? [])].map(summary) : (state.otherTeams ?? []).map(summary),
+  } : null;
   const payload = () => ({ configured: state.configured, authenticated: Boolean(current), account: identity() });
 
   await context.route("**/api/session", async (route) => {

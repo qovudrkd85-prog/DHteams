@@ -2,8 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { AccountError, accountFailure, createAuthContext, readJson, requireSameOrigin, sessionPayload } from "@/lib/server-auth";
 
-type TeamAction = "create" | "join" | "leave" | "regenerate";
-const actions: readonly TeamAction[] = ["create", "join", "leave", "regenerate"];
+type TeamAction = "create" | "join" | "leave" | "regenerate" | "switch";
+const actions: readonly TeamAction[] = ["create", "join", "leave", "regenerate", "switch"];
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function readAction(value: unknown): TeamAction {
   if (typeof value === "string" && (actions as readonly string[]).includes(value)) return value as TeamAction;
@@ -22,6 +23,11 @@ function readCode(value: unknown): string {
   return code;
 }
 
+function readTeamId(value: unknown): string {
+  if (typeof value !== "string" || !uuidPattern.test(value)) throw new AccountError("바꿀 팀을 다시 선택해 주세요.");
+  return value.toLowerCase();
+}
+
 export async function POST(request: NextRequest) {
   const denied = requireSameOrigin(request);
   if (denied) return denied;
@@ -34,8 +40,9 @@ export async function POST(request: NextRequest) {
     const call =
       action === "create" ? auth.supabase.rpc("create_team", { p_name: readName(body.name) })
         : action === "join" ? auth.supabase.rpc("join_team", { p_code: readCode(body.code) })
-          : action === "leave" ? auth.supabase.rpc("leave_team")
-            : auth.supabase.rpc("regenerate_team_code");
+          : action === "switch" ? auth.supabase.rpc("switch_team", { p_team: readTeamId(body.teamId) })
+            : action === "leave" ? auth.supabase.rpc("leave_team")
+              : auth.supabase.rpc("regenerate_team_code");
     const { error } = await call;
     if (error) {
       if (["PGRST202", "42883", "42703", "42P01"].includes(error.code)) {

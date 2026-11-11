@@ -28,7 +28,7 @@ async function freePort() {
 }
 
 async function fakeSupabase() {
-  const state = { calls: [], accounts: new Map(), tokens: new Map(), refreshTokens: new Map(), ready: true, confirmEmail: false, seatConflict: false, teams: new Map(), teamRpcError: null };
+  const state = { calls: [], accounts: new Map(), tokens: new Map(), refreshTokens: new Map(), ready: true, confirmEmail: false, seatConflict: false, teams: new Map(), memberships: [], membershipsMissing: false, teamRpcError: null };
   const addAccount = (username) => {
     const id = randomUUID();
     const email = `${username}@members.dhteams.invalid`;
@@ -69,31 +69,67 @@ async function fakeSupabase() {
         if (state.seatConflict) return send(409, { code: "23505", message: "다른 팀원이 이미 선택한 자리입니다." });
         return send(200, { id: body.p_layout_id, name: "1번 사무실", theme: "sage", items: [{ id: "own-desk", kind: "desk", x: 250, y: 200, rotation: 0, label: "", member_id: body.p_item_id ? account.member.id : null }], updated_at: new Date().toISOString() });
       }
-      if (url.pathname.startsWith("/rest/v1/rpc/") && ["create_team", "join_team", "leave_team", "regenerate_team_code"].includes(url.pathname.slice(13))) {
+      // Several teams per person: memberships are rows, team_members.team_id is the active team.
+      const membershipsOf = (memberId) => state.memberships.filter((row) => row.member_id === memberId);
+      const addMembership = (memberId, teamId) => state.memberships.push({
+        member_id: memberId, team_id: teamId, joined_at: new Date(Date.now() + state.memberships.length).toISOString(),
+        role: state.memberships.some((row) => row.team_id === teamId) ? "member" : "owner",
+      });
+      const pick = (row, columns) => (columns.includes("*") ? row : Object.fromEntries(columns.map((column) => [column, row[column]])));
+      if (url.pathname.startsWith("/rest/v1/rpc/") && ["create_team", "join_team", "leave_team", "regenerate_team_code", "switch_team"].includes(url.pathname.slice(13))) {
         if (!account) return send(401, { message: "Missing authenticated user token" });
         if (state.teamRpcError) return send(400, state.teamRpcError);
         const rpcName = url.pathname.slice(13);
+        const memberId = account.member.id;
         if (rpcName === "create_team") {
-          const team = { id: randomUUID(), name: body.p_name, invite_code: "K7QM3XPA", created_by: account.member.id };
+          const team = { id: randomUUID(), name: body.p_name, invite_code: state.teams.size ? `K7QM3XP${"BCDEFGH"[state.teams.size]}` : "K7QM3XPA", created_by: memberId };
           state.teams.set(team.id, team);
+          addMembership(memberId, team.id);
           account.member.team_id = team.id;
           return send(200, team);
         }
         if (rpcName === "join_team") {
           const team = [...state.teams.values()].find((candidate) => candidate.invite_code === body.p_code);
           if (!team) return send(404, { code: "P0002", message: "초대코드에 맞는 팀이 없습니다." });
+          if (membershipsOf(memberId).some((row) => row.team_id === team.id)) return send(400, { code: "23514", message: "이미 이 팀 소속입니다." });
+          addMembership(memberId, team.id);
           account.member.team_id = team.id;
           return send(200, team);
         }
-        if (rpcName === "leave_team") { account.member.team_id = null; return send(204); }
+        if (rpcName === "switch_team") {
+          if (!membershipsOf(memberId).some((row) => row.team_id === body.p_team)) return send(403, { code: "42501", message: "소속된 팀으로만 바꿀 수 있습니다." });
+          account.member.team_id = body.p_team;
+          return send(200, state.teams.get(body.p_team));
+        }
+        if (rpcName === "leave_team") {
+          state.memberships = state.memberships.filter((row) => !(row.member_id === memberId && row.team_id === account.member.team_id));
+          account.member.team_id = membershipsOf(memberId).at(-1)?.team_id ?? null;
+          return send(204);
+        }
         const team = state.teams.get(account.member.team_id);
         team.invite_code = "N4RT8WZB";
         return send(200, team);
       }
+      if (url.pathname === "/rest/v1/team_memberships") {
+        if (!account) return send(401, { message: "Missing authenticated user token" });
+        if (state.membershipsMissing) return send(404, { code: "PGRST205", message: "Could not find the table" });
+        // RLS: my rows and the rows of my active team.
+        let rows = state.memberships.filter((row) => row.member_id === account.member.id || row.team_id === account.member.team_id);
+        for (const key of ["member_id", "team_id", "role"]) {
+          const filter = url.searchParams.get(key);
+          if (filter?.startsWith("eq.")) rows = rows.filter((row) => row[key] === filter.slice(3));
+        }
+        rows = [...rows].sort((a, b) => a.joined_at.localeCompare(b.joined_at));
+        return send(200, rows.map((row) => pick(row, (url.searchParams.get("select") || "*").split(","))));
+      }
       if (url.pathname === "/rest/v1/teams") {
         if (!account) return send(401, { message: "Missing authenticated user token" });
-        const filter = url.searchParams.get("id");
-        const teams = [...state.teams.values()].filter((team) => filter === `eq.${team.id}` && team.id === account.member.team_id);
+        const filter = url.searchParams.get("id") || "";
+        const wanted = filter.startsWith("in.(") ? filter.slice(4, -1).split(",") : [filter.slice(3)];
+        // RLS: teams I belong to (legacy DB without memberships: the active team only).
+        const mine = state.membershipsMissing ? [account.member.team_id] : membershipsOf(account.member.id).map((row) => row.team_id);
+        const teams = [...state.teams.values()].filter((team) => wanted.includes(team.id) && mine.includes(team.id))
+          .map((team) => pick(team, (url.searchParams.get("select") || "*").split(",")));
         if (String(request.headers.accept).includes("application/vnd.pgrst.object+json")) return teams.length === 1 ? send(200, teams[0]) : send(406, { code: "PGRST116", message: "No row" });
         return send(200, teams);
       }
@@ -317,6 +353,7 @@ function client(baseURL) {
     const created = await browser.request("/api/team", { method: "POST", body: { action: "create", name: " A팀 " } });
     assert.equal(created.status, 200, JSON.stringify(created.data));
     assert.deepEqual(created.data.account.team, { id: alice.member.team_id, name: "A팀", invite_code: "K7QM3XPA", is_owner: true, can_rotate_code: true });
+    assert.deepEqual(created.data.account.teams, [{ id: alice.member.team_id, name: "A팀", is_owner: true }], "team list never carries invite codes");
     assert.deepEqual(upstream.state.calls.findLast((call) => call.path === "/rest/v1/rpc/create_team").body, { p_name: "A팀" });
     const rotated = await browser.request("/api/team", { method: "POST", body: { action: "regenerate" } });
     assert.equal(rotated.data.account.team.invite_code, "N4RT8WZB");
@@ -329,6 +366,50 @@ function client(baseURL) {
     assert.equal(joined.status, 200, JSON.stringify(joined.data));
     assert.deepEqual(upstream.state.calls.findLast((call) => call.path === "/rest/v1/rpc/join_team").body, { p_code: "N4RT8WZB" });
     assert.equal(joined.data.account.team.is_owner, true);
+    // A second team while already in one: allowed, the new team becomes active.
+    const teamA = joined.data.account.team;
+    const second = await browser.request("/api/team", { method: "POST", body: { action: "create", name: "B팀" } });
+    assert.equal(second.status, 200, JSON.stringify(second.data));
+    assert.equal(second.data.account.team.name, "B팀");
+    assert.deepEqual(second.data.account.teams.map((team) => team.name), ["A팀", "B팀"]);
+    assert.equal(second.data.account.teams.some((team) => "invite_code" in team), false);
+    const teamB = second.data.account.team;
+    // Switching: uuid checked before any upstream call, RPC refusal is 403.
+    const switchCalls = () => upstream.state.calls.filter((call) => call.path === "/rest/v1/rpc/switch_team").length;
+    const beforeSwitch = switchCalls();
+    assert.equal((await browser.request("/api/team", { method: "POST", body: { action: "switch", teamId: "not-a-uuid" } })).status, 400);
+    assert.equal((await browser.request("/api/team", { method: "POST", body: { action: "switch" } })).status, 400);
+    assert.equal((await browser.request("/api/team", { method: "POST", origin: "https://untrusted.example", body: { action: "switch", teamId: teamA.id } })).status, 403);
+    assert.equal(switchCalls(), beforeSwitch);
+    assert.equal((await browser.request("/api/team", { method: "POST", body: { action: "switch", teamId: randomUUID() } })).status, 403);
+    const switchedBack = await browser.request("/api/team", { method: "POST", body: { action: "switch", teamId: teamA.id.toUpperCase() } });
+    assert.equal(switchedBack.status, 200, JSON.stringify(switchedBack.data));
+    assert.deepEqual(upstream.state.calls.findLast((call) => call.path === "/rest/v1/rpc/switch_team").body, { p_team: teamA.id });
+    assert.equal(switchedBack.data.account.team.id, teamA.id);
+    assert.equal(switchedBack.data.account.team.invite_code, "N4RT8WZB");
+    assert.equal((await browser.request("/api/session")).data.account.team.id, teamA.id);
+    // Owner flags follow the role in the active team.
+    const aliceInA = upstream.state.memberships.find((row) => row.member_id === alice.member.id && row.team_id === teamA.id);
+    aliceInA.role = "member";
+    upstream.state.memberships.push({ member_id: bob.member.id, team_id: teamA.id, role: "owner", joined_at: new Date(0).toISOString() });
+    const asMember = (await browser.request("/api/session")).data.account;
+    assert.equal(asMember.team.is_owner, false);
+    assert.equal(asMember.team.can_rotate_code, false);
+    assert.deepEqual(asMember.teams.map((team) => [team.name, team.is_owner]), [["A팀", false], ["B팀", true]]);
+    upstream.state.memberships = upstream.state.memberships.filter((row) => row.member_id !== bob.member.id);
+    assert.equal((await browser.request("/api/session")).data.account.team.can_rotate_code, true, "nobody owns the team: anyone may rotate");
+    aliceInA.role = "owner";
+    // Leaving the active team moves to the remaining one.
+    const leftA = await browser.request("/api/team", { method: "POST", body: { action: "leave" } });
+    assert.equal(leftA.data.account.team.id, teamB.id);
+    assert.deepEqual(leftA.data.account.teams.map((team) => team.id), [teamB.id]);
+    // Database without the memberships SQL: the active team still loads, listed alone.
+    upstream.state.membershipsMissing = true;
+    const legacySession = (await browser.request("/api/session")).data.account;
+    assert.equal(legacySession.team.id, teamB.id);
+    assert.equal(legacySession.team.is_owner, true);
+    assert.deepEqual(legacySession.teams, [{ id: teamB.id, name: "B팀", is_owner: true }]);
+    upstream.state.membershipsMissing = false;
     upstream.state.teamRpcError = { code: "23514", message: "이미 팀에 소속되어 있습니다." };
     const already = await browser.request("/api/team", { method: "POST", body: { action: "create", name: "B팀" } });
     assert.equal(already.status, 400);

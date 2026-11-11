@@ -8,11 +8,21 @@ export interface TeamSpace {
   can_rotate_code: boolean;
 }
 
+/** A team I belong to, for the team switcher. Never carries the invite code. */
+export interface TeamSummary {
+  id: string;
+  name: string;
+  is_owner: boolean;
+}
+
 export interface AccountIdentity {
   id: string;
   username: string;
   member: TeamMember;
+  /** The team I am looking at now (shared by all my devices). */
   team: TeamSpace | null;
+  /** Every team I belong to, in joining order. */
+  teams: TeamSummary[];
 }
 
 export type Account = AccountIdentity;
