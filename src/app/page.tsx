@@ -12,6 +12,7 @@ import { HubTabs, useHubView } from "@/components/team/hub-tabs";
 import type { HubView } from "@/lib/team/rooms";
 import { TeamPanel } from "@/components/team/panel";
 import { Garage, HealingCard } from "@/components/team/garage";
+import { HealingPlace } from "@/components/team/healing/healing-place";
 import { TeamRoomMini } from "@/components/team/team-room";
 import { ProjectFocusListener, UpcomingBadge, useFocusTarget, useUpcomingDeadlines } from "@/components/team/project-deadline-filter";
 import { TrashDialog } from "@/components/trash-dialog";
@@ -239,7 +240,7 @@ export default function HomePage() {
               />
             </section>
             {view === "garage" && (
-              <Garage workspace={workspace} healing={healing} onHealingEnd={() => { setHealing(false); setHealingEnded(true); }} />
+              <Garage workspace={workspace} />
             )}
           </div>
           <aside
@@ -249,7 +250,9 @@ export default function HomePage() {
             {view === "garage" && (
               <>
                 <TeamPanel workspace={workspace} compact />
-                {!healing && <HealingCard focusOnMount={healingEnded} onOpen={() => { setHealing(true); setHealingEnded(false); }} />}
+                {healing
+                  ? <HealingPlace compact member={workspace.error ? null : workspace.currentMember} onBack={() => { setHealing(false); setHealingEnded(true); }} />
+                  : <HealingCard focusOnMount={healingEnded} onOpen={() => { setHealing(true); setHealingEnded(false); }} />}
               </>
             )}
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" data-testid="project-list">

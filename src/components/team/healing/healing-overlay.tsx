@@ -25,6 +25,8 @@ interface HealingOverlayProps {
   onClose: () => void;
   /** Render inside the page area instead of a full-screen modal. */
   inline?: boolean;
+  /** Small side-column window (implies inline): controls sit below a 16:9 picture instead of over it. */
+  compact?: boolean;
   /** Extra controls shown above the scene chips. */
   children?: (ctx: HealingWorldContext) => ReactNode;
 }
@@ -63,7 +65,8 @@ function WeatherEffects({ effect }: { effect: WeatherEffect }) {
 }
 
 // Full-screen personal rest view opened from my own desk.
-export function HealingOverlay({ onClose, inline = false, children }: HealingOverlayProps) {
+export function HealingOverlay({ onClose, inline: inlineProp = false, compact = false, children }: HealingOverlayProps) {
+  const inline = inlineProp || compact;
   const { account, updateStatus } = useAccount();
   const [prefs, setPrefs] = useState<HealingPrefs>(() => loadHealingPrefs());
   const [weather, setWeather] = useState<CurrentWeather | null>(null);
@@ -183,15 +186,8 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return (
-    <div
-      ref={dialogRef}
-      role={inline ? "region" : "dialog"}
-      aria-modal={inline ? undefined : true}
-      aria-label={`힐링 타임 · ${header.name}`}
-      className={inline ? "relative h-[72vh] min-h-[440px] overflow-hidden rounded-2xl bg-black text-white shadow-sm" : "fixed inset-0 z-[80] bg-black text-white"}
-      data-testid={inline ? "healing-place" : "healing-overlay"}
-    >
+  const world = (
+    <>
       <HealingWorld
         startZone={startZone}
         teleport={teleport}
@@ -205,6 +201,70 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
       />
       <WeatherEffects effect={weather?.effect ?? "clear"} />
       <div className={styles.vignette} />
+    </>
+  );
+  const weatherText = weather ? `${city.name} 지금 ${weather.label}${weather.temperature !== null ? ` · ${Math.round(weather.temperature)}°` : ""}` : weatherError ? `${weatherError} 기본 풍경을 보여 드려요.` : `${city.name} 날씨 확인 중…`;
+  const closeLabel = inline ? "정비실로 돌아오기 (Esc)" : "힐링 타임 끝내기 (Esc)";
+  const chip = (active: boolean) => cn("shrink-0 rounded-full px-3 py-1.5 text-sm backdrop-blur", compact && "px-2.5 py-1 text-xs", active ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25");
+  const sceneChips = (
+    <div className={cn("flex gap-2", compact ? "overflow-x-auto pb-1" : "flex-wrap")} role="group" aria-label="바로 가기">
+      <button type="button" aria-pressed={prefs.sceneId === "auto"} onClick={() => pickScene("auto")} className={chip(prefs.sceneId === "auto")}>☁️ 지금 날씨대로</button>
+      {HEALING_SCENES.map((item) => (
+        <button key={item.id} type="button" aria-pressed={prefs.sceneId === item.id} onClick={() => pickScene(item.id)} className={chip(prefs.sceneId === item.id)}>{item.emoji} {item.name}</button>
+      ))}
+    </div>
+  );
+  const settings = (
+    <div className="flex flex-wrap items-center gap-3 text-xs text-white/80">
+      <label className="flex items-center gap-1.5">도시
+        <select value={city.id} onChange={(event) => update({ cityId: event.target.value })} className="rounded bg-black/40 px-2 py-1 text-white">
+          {HEALING_CITIES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+      </label>
+      <span className="flex items-center gap-1" role="group" aria-label="쉬는 시간">
+        {HEALING_MINUTES.map((minutes) => (
+          <button key={minutes} type="button" aria-pressed={prefs.minutes === minutes} onClick={() => { update({ minutes: minutes as HealingMinutes }); setEndsAt(Date.now() + minutes * 60_000); }} className={cn("rounded px-2 py-1", prefs.minutes === minutes ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25")}>{minutes}분</button>
+        ))}
+      </span>
+      {!compact && <span className="hidden sm:inline">방향키·WASD 로 걷기 · 탭해서 가기 · 소품에 서면 시작 · Esc 닫기</span>}
+    </div>
+  );
+
+  if (compact) {
+    // Small window: title line, 16:9 picture (weather effects stay inside it), then controls below.
+    return (
+      <div ref={dialogRef} role="region" aria-label={`힐링 타임 · ${header.name}`} className="overflow-hidden rounded-2xl bg-slate-900 text-white shadow-sm" data-testid="healing-place" data-compact="true">
+        <div className="flex items-center gap-2 px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-sm font-semibold" data-testid="healing-zone">{header.emoji} {header.name}</h2>
+            <p className="flex items-center gap-1 truncate text-[11px] text-white/70" data-testid="healing-weather"><CloudSun className="size-3 shrink-0" /><span className="truncate">{weatherText}</span></p>
+          </div>
+          <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 font-mono text-sm tabular-nums" aria-live="off" data-testid="healing-timer">{formatRemaining(remaining)}</span>
+          <button ref={closeRef} type="button" onClick={onClose} className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white/15 hover:bg-white/25 sm:size-8" aria-label={closeLabel} data-testid="healing-close"><X className="size-4" /></button>
+        </div>
+        <div className="relative aspect-video w-full overflow-hidden bg-black">{world}</div>
+        <div className="space-y-2 p-2">
+          {children?.({ sceneId: worldScene, activity, walkTo })}
+          {sceneChips}
+          <details className="text-xs text-white/80">
+            <summary className="cursor-pointer select-none py-1">도시·시간</summary>
+            <div className="pt-1">{settings}</div>
+          </details>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={dialogRef}
+      role={inline ? "region" : "dialog"}
+      aria-modal={inline ? undefined : true}
+      aria-label={`힐링 타임 · ${header.name}`}
+      className={inline ? "relative h-[72vh] min-h-[440px] overflow-hidden rounded-2xl bg-black text-white shadow-sm" : "fixed inset-0 z-[80] bg-black text-white"}
+      data-testid={inline ? "healing-place" : "healing-overlay"}
+    >
+      {world}
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 bg-gradient-to-b from-black/60 to-transparent p-4 sm:p-6">
         <div className="pointer-events-auto">
@@ -213,36 +273,19 @@ export function HealingOverlay({ onClose, inline = false, children }: HealingOve
           <p className="text-xs text-white/70">{header.caption}</p>
           <p className="mt-2 flex items-center gap-1 text-xs text-white/80" data-testid="healing-weather">
             <CloudSun className="size-3.5" />
-            {weather ? `${city.name} 지금 ${weather.label}${weather.temperature !== null ? ` · ${Math.round(weather.temperature)}°` : ""}` : weatherError ? `${weatherError} 기본 풍경을 보여 드려요.` : `${city.name} 날씨 확인 중…`}
+            {weatherText}
           </p>
         </div>
         <div className="pointer-events-auto flex items-center gap-3">
           <span className="rounded-full bg-black/40 px-3 py-1 font-mono text-lg tabular-nums" aria-live="off" data-testid="healing-timer">{formatRemaining(remaining)}</span>
-          <button ref={closeRef} type="button" onClick={onClose} className="rounded-full bg-white/15 p-2 hover:bg-white/25" aria-label={inline ? "정비실로 돌아오기 (Esc)" : "힐링 타임 끝내기 (Esc)"} data-testid="healing-close"><X className="size-5" /></button>
+          <button ref={closeRef} type="button" onClick={onClose} className="rounded-full bg-white/15 p-2 hover:bg-white/25" aria-label={closeLabel} data-testid="healing-close"><X className="size-5" /></button>
         </div>
       </div>
 
       <div className="absolute inset-x-0 bottom-0 space-y-3 bg-gradient-to-t from-black/70 to-transparent p-4 sm:p-6">
         {children?.({ sceneId: worldScene, activity, walkTo })}
-        <div className="flex flex-wrap gap-2" role="group" aria-label="바로 가기">
-          <button type="button" aria-pressed={prefs.sceneId === "auto"} onClick={() => pickScene("auto")} className={cn("rounded-full px-3 py-1.5 text-sm backdrop-blur", prefs.sceneId === "auto" ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25")}>☁️ 지금 날씨대로</button>
-          {HEALING_SCENES.map((item) => (
-            <button key={item.id} type="button" aria-pressed={prefs.sceneId === item.id} onClick={() => pickScene(item.id)} className={cn("rounded-full px-3 py-1.5 text-sm backdrop-blur", prefs.sceneId === item.id ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25")}>{item.emoji} {item.name}</button>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs text-white/80">
-          <label className="flex items-center gap-1.5">도시
-            <select value={city.id} onChange={(event) => update({ cityId: event.target.value })} className="rounded bg-black/40 px-2 py-1 text-white">
-              {HEALING_CITIES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </label>
-          <span className="flex items-center gap-1" role="group" aria-label="쉬는 시간">
-            {HEALING_MINUTES.map((minutes) => (
-              <button key={minutes} type="button" aria-pressed={prefs.minutes === minutes} onClick={() => { update({ minutes: minutes as HealingMinutes }); setEndsAt(Date.now() + minutes * 60_000); }} className={cn("rounded px-2 py-1", prefs.minutes === minutes ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25")}>{minutes}분</button>
-            ))}
-          </span>
-          <span className="hidden sm:inline">방향키·WASD 로 걷기 · 탭해서 가기 · 소품에 서면 시작 · Esc 닫기</span>
-        </div>
+        {sceneChips}
+        {settings}
       </div>
     </div>
   );

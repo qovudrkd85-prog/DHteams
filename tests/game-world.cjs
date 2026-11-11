@@ -197,13 +197,23 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     await page.reload();
     await page.getByTestId("garage").waitFor();
 
-    // Garage -> healing place (inline, no modal) -> activity -> back with Esc.
+    // Garage -> healing place (small window in the side column, no modal) -> activity -> back with Esc.
     await page.route("https://api.open-meteo.com/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ current: { weather_code: 61, is_day: 1, temperature_2m: 14.2 } }) }));
     await page.getByTestId("healing-open").click();
     const place = page.getByTestId("healing-place");
     await place.waitFor();
     assert.equal(await page.getByTestId("healing-overlay").count(), 0, "Healing opens inline, not as a modal.");
-    assert.equal(await page.getByTestId("garage").count(), 0, "The healing place replaces the garage area.");
+    assert.ok(await page.getByTestId("garage").isVisible(), "The garage stays on screen while healing.");
+    assert.ok(await page.getByTestId("garage-calendar").isVisible(), "My calendar stays on screen while healing.");
+    assert.equal(await page.locator('aside[aria-label="과업 목록과 팀 방"] [data-testid="healing-place"]').count(), 1, "Healing opens in the side column.");
+    const placeBox = await place.boundingBox();
+    assert.ok(placeBox.width <= 380 && placeBox.height <= 420, `Healing window too big (${Math.round(placeBox.width)}x${Math.round(placeBox.height)}).`);
+    assert.ok((await page.getByTestId("healing-scene").boundingBox()).height <= 220, "Healing picture stays small.");
+    // Esc from outside the healing window (a calendar button) does not close it.
+    await page.getByTestId("garage-calendar").getByRole("button").first().focus();
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(200);
+    assert.equal(await place.count(), 1, "Esc outside the healing window must not close it.");
     await page.getByTestId("healing-weather").filter({ hasText: "비" }).waitFor();
     await page.getByTestId("healing-effect-rain").waitFor();
     const scene = page.getByTestId("healing-scene");
@@ -228,6 +238,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     await page.keyboard.press("Escape");
     await place.waitFor({ state: "detached" });
     await page.getByTestId("garage").waitFor();
+    await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "healing-open", null, { timeout: 5000 });
     await until(() => me.status_message === "오후 보고서 집중 중", "Leaving healing must restore my status.");
 
     // A trip to the team tab ends healing for good: coming back shows the garage, not healing.
@@ -246,6 +257,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "Garage must fit the mobile width.");
     await page.getByTestId("healing-open").click();
     await place.waitFor();
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "Open healing window must fit the mobile width.");
     const before = Number(await page.getByTestId("healing-scene").getAttribute("data-x"));
     const spot = await page.evaluate(() => {
       const world = document.querySelector("[data-testid=healing-scene]");
@@ -282,6 +294,6 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     await page.getByTestId("garage").waitFor();
     assert.equal(await tabSelected("garage"), true, "Mobile: door then button enters the garage.");
     assert.deepEqual(errors, []);
-    console.log("PASS: inline team calendar and room, other member seated, status retry, sit once/stand, garage door (two-step E/Enter/button, F sit/stand, IME codes, no keys from inputs), tab memory across reload, garage -> inline healing (weather start zone, fast travel, walk to rod, seam walk, Esc back, status restore), no healing after team tab trip, mobile width + tap to walk.");
+    console.log("PASS: inline team calendar and room, other member seated, status retry, sit once/stand, garage door (two-step E/Enter/button, F sit/stand, IME codes, no keys from inputs), tab memory across reload, garage -> small healing window beside my calendar (size, Esc only from inside, focus back, weather start zone, fast travel, walk to rod, seam walk, Esc back, status restore), no healing after team tab trip, mobile width + tap to walk.");
   } finally { await browser.close(); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

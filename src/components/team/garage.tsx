@@ -3,21 +3,14 @@
 import { useEffect, useRef } from "react";
 import { Waves } from "lucide-react";
 import { DepartmentCalendar } from "@/components/department-calendar";
-import { HealingPlace } from "@/components/team/healing/healing-place";
 import type { TeamWorkspaceState } from "@/lib/team/use-team-workspace";
 
 interface GarageProps {
   workspace: TeamWorkspaceState;
-  /** True while the healing place replaces the garage area. */
-  healing: boolean;
-  onHealingEnd: () => void;
 }
 
-/** Personal garage: my private calendar (the team card sits in the side column), or the healing place. */
-export function Garage({ workspace, healing, onHealingEnd }: GarageProps) {
-  if (healing) {
-    return <HealingPlace member={workspace.error ? null : workspace.currentMember} onBack={onHealingEnd} />;
-  }
+/** Personal garage: my private calendar. The team card and healing window sit in the side column. */
+export function Garage({ workspace }: GarageProps) {
   return (
     <section className="flex flex-col gap-5 *:min-w-0" aria-label="내 정비실" data-testid="garage">
       <div className="phone-cal rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:p-5" data-testid="garage-calendar">
@@ -38,7 +31,7 @@ interface HealingCardProps {
   focusOnMount?: boolean;
 }
 
-/** Side card that opens the healing place in the garage area. */
+/** Side card that opens the small healing window in its place. */
 export function HealingCard({ onOpen, focusOnMount = false }: HealingCardProps) {
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
