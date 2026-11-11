@@ -368,6 +368,21 @@ const deferred = () => {
     await usePeer.waitFor({ state: "hidden" });
     assert.equal(memos.get(month).content, "동료 글 두 번째");
     assert.equal(memoWrites.length, writesBeforeUsePeer, "Taking the teammate's text writes nothing.");
+    // Switching month during a conflict must not drop my unsaved text.
+    memos.set(month, { content: "동료 글 세 번째", updated_at: stamp() });
+    await memo.fill("월 전환해도 남을 내 글");
+    await memo.blur();
+    await conflictText.waitFor();
+    await page.locator("button:has(svg.lucide-chevron-right)").click();
+    await page.waitForFunction((label) => document.querySelector(`[aria-label="${label}"]`)?.value === "다음 달 원래 메모", `${nextMonth} 주요사항`);
+    await page.locator("button:has(svg.lucide-chevron-left)").click();
+    await page.waitForFunction((label) => document.querySelector(`[aria-label="${label}"]`)?.value === "월 전환해도 남을 내 글", `${month} 주요사항`);
+    await conflictText.waitFor();
+    await peerBox.getByText("동료 글 세 번째", { exact: true }).waitFor();
+    assert.equal(memos.get(month).content, "동료 글 세 번째", "Returning to the month must not save over the teammate.");
+    await keepMine.click();
+    await page.getByText("저장됨", { exact: true }).waitFor();
+    assert.equal(memos.get(month).content, "월 전환해도 남을 내 글");
 
     // Height: a long memo scrolls inside a capped textarea and the header counts lines.
     await memo.fill(Array.from({ length: 100 }, (_, i) => `${i + 1}번째 줄`).join("\n"));
@@ -382,7 +397,7 @@ const deferred = () => {
     await actor.waitFor();
     assert.equal(await actor.inputValue(), "", "A reloaded log keeps the cleared actor.");
     assert.deepEqual(errors, []);
-    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer, capped memo height.");
+    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height.");
   } finally {
     await browser.close();
   }

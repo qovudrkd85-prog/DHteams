@@ -25,6 +25,9 @@ const REFRESH_MS = 30000;
 const saves = new Map<string, Promise<string>>();
 // updated_at we last read or wrote per memo; a save only lands if the row still has it.
 const bases = new Map<string, string | null>();
+// Unsaved text left behind during a conflict (month switch or unmount).
+// Coming back to that month shows the conflict again with this text.
+const conflictDrafts = new Map<string, string>();
 
 const memoKey = (projectId: string, month: string) => `${projectId}:${month}`;
 
@@ -156,8 +159,19 @@ function MonthMemoEditor({ projectId, month }: MonthMemoProps) {
       .then((snapshot) => {
         if (!cancelled) {
           bases.set(key, snapshot.updatedAt);
-          setContent(snapshot.content);
-          setStatus("idle");
+          const draft = conflictDrafts.get(key);
+          conflictDrafts.delete(key);
+          if (draft !== undefined && draft !== snapshot.content) {
+            // Resume the open conflict against the freshest teammate text.
+            pending.current = draft;
+            conflict.current = true;
+            setContent(draft);
+            setLatest(snapshot);
+            setStatus("conflict");
+          } else {
+            setContent(snapshot.content);
+            setStatus("idle");
+          }
           setLoaded(true);
           loadedRef.current = true;
           setLoadError(false);
@@ -175,6 +189,8 @@ function MonthMemoEditor({ projectId, month }: MonthMemoProps) {
     return () => {
       cancelled = true;
       mounted.current = false;
+      // flush() saves nothing during a conflict, so park the text for this month.
+      if (conflict.current && pending.current !== null) conflictDrafts.set(key, pending.current);
       flush();
     };
   }, [key, projectId, month, loadAttempt, flush, setStatus]);
@@ -208,6 +224,7 @@ function MonthMemoEditor({ projectId, month }: MonthMemoProps) {
 
   function keepMine() {
     if (!latest) return;
+    conflictDrafts.delete(key);
     bases.set(key, latest.updatedAt);
     conflict.current = false;
     setLatest(null);
@@ -218,6 +235,7 @@ function MonthMemoEditor({ projectId, month }: MonthMemoProps) {
 
   function usePeer() {
     if (!latest) return;
+    conflictDrafts.delete(key);
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
     revision.current += 1;
