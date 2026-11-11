@@ -64,3 +64,21 @@ export function withOwnDesk(layout: OfficeLayout, memberId: string): { draft: Of
   }
   throw new Error("책상 자리가 없어요. 팀 방이 가득 찼어요.");
 }
+
+/** Distance from the garage door at which the "enter" action becomes available. */
+export const DOOR_REACH = 150;
+const DOOR_CLEARANCE = 120;
+
+/** Door to "my garage" on the lounge rug: rug center, else its left end, else its right end. */
+export function garageDoor(layout: OfficeLayout): { x: number; y: number } {
+  const width = layout.canvas_width ?? 1000;
+  const height = layout.canvas_height ?? 560;
+  const y = height - 185;
+  const candidates = [{ x: width - 250, y }, { x: width - 360, y }, { x: width - 140, y }];
+  const clear = (spot: { x: number; y: number }) => layout.items.every((item) => Math.hypot(item.x - spot.x, item.y - spot.y) >= DOOR_CLEARANCE);
+  return candidates.find(clear) ?? candidates[0];
+}
+
+export function nearGarageDoor(pos: { x: number; y: number }, door: { x: number; y: number }): boolean {
+  return Math.hypot(pos.x - door.x, pos.y - door.y) < DOOR_REACH;
+}

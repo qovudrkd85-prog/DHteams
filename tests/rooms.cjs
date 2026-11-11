@@ -67,4 +67,20 @@ assert.ok(grown.draft.canvas_width > 1000 || grown.draft.canvas_height > 560);
 const huge = room("o1", "office", "office-1", { canvas_width: 2400, canvas_height: 1200, items: r.deskSlots(2400, 1200).map((s, i) => desk(`h${i}`, s.x, s.y, `m${i + 100}`)) });
 assert.throws(() => r.withOwnDesk(huge, "m1"), /책상 자리가 없어요/);
 
+// Garage door on the lounge rug.
+const empty = room("o1", "office", "office-1", { canvas_width: 1600, canvas_height: 900 });
+assert.deepEqual({ ...r.garageDoor(empty) }, { x: 1350, y: 715 });
+const rugDesk = room("o1", "office", "office-1", { canvas_width: 1600, canvas_height: 900, items: [desk("d9", 1360, 700)] });
+const moved = r.garageDoor(rugDesk);
+assert.notDeepEqual({ ...moved }, { x: 1350, y: 715 });
+for (const item of rugDesk.items) assert.ok(Math.hypot(moved.x - item.x, moved.y - item.y) >= 120, "door on furniture");
+for (const sized of [empty, room("s", "office", "office-1"), room("b", "office", "office-1", { canvas_width: 2400, canvas_height: 1200 })]) {
+  const door = r.garageDoor(sized);
+  const w = sized.canvas_width ?? 1000, h = sized.canvas_height ?? 560;
+  assert.ok(door.x >= 24 && door.x <= w - 24 && door.y >= 80 && door.y <= h - 30, `door out of walk bounds ${JSON.stringify(door)}`);
+}
+assert.equal(r.DOOR_REACH, 150);
+assert.equal(r.nearGarageDoor({ x: 1350 + 149, y: 715 }, { x: 1350, y: 715 }), true);
+assert.equal(r.nearGarageDoor({ x: 1350, y: 715 - 151 }, { x: 1350, y: 715 }), false);
+
 console.log("rooms ok");
