@@ -35,7 +35,14 @@ const deferred = () => {
     ["오늘 일정 1", "오늘 일정 2", "오늘 일정 3", "오늘 일정 4", "오늘 완료 일정"].forEach((title, i) => {
       schedules.push({ id: `t${i + 1}`, project_id: "p1", title, due_date: today, assignee: null, note: null, color: "blue", done: i === 4, created_at: today, deleted_at: null });
     });
-    const memos = new Map([[month, "이번 달 원래 메모"], [nextMonth, "다음 달 원래 메모"]]);
+    // Monotonic fake clock for project_memos.updated_at (the optimistic-lock token).
+    let clock = Date.parse("2026-01-01T00:00:00Z");
+    const stamp = () => new Date((clock += 1000)).toISOString();
+    const memos = new Map([
+      [month, { content: "이번 달 원래 메모", updated_at: stamp() }],
+      [nextMonth, { content: "다음 달 원래 메모", updated_at: stamp() }],
+    ]);
+    const memoSelects = [];
     const memoWrites = [];
     const logWrites = [];
     let holdSave = null;
@@ -81,16 +88,30 @@ const deferred = () => {
       if (table === "project_memos") {
         if (method === "GET") {
           const key = url.searchParams.get("month").slice(3);
+          memoSelects.push(url.searchParams.get("select") || "");
           if (key === nextMonth && nextLoad) await nextLoad.promise;
-          return route.fulfill({ json: { content: memos.get(key) || "" } });
+          const row = memos.get(key);
+          return route.fulfill({ json: row ? [{ ...row }] : [] });
         }
-        memoWrites.push(body);
+        memoWrites.push({ method, body });
         const blocked = holdSave;
         holdSave = null;
         if (blocked) await blocked.promise;
         if (failSave) return route.fulfill({ status: 503, json: { message: "테스트 저장 실패" } });
-        memos.set(body.month, body.content);
-        return route.fulfill({ status: 204 });
+        if (method === "POST") {
+          // Insert only: an existing row is a unique violation, like the real primary key.
+          if (memos.has(body.month)) return route.fulfill({ status: 409, json: { code: "23505", message: "duplicate key value" } });
+          const updatedAt = body.updated_at || stamp();
+          memos.set(body.month, { content: body.content, updated_at: updatedAt });
+          return route.fulfill({ status: 201, json: { updated_at: updatedAt } });
+        }
+        // PATCH ... updated_at=eq.<base>: a stale base matches no row.
+        const key = url.searchParams.get("month").slice(3);
+        const row = memos.get(key);
+        if (!row || url.searchParams.get("updated_at") !== `eq.${row.updated_at}`) return route.fulfill({ json: null });
+        const updatedAt = body.updated_at || stamp();
+        memos.set(key, { content: body.content, updated_at: updatedAt });
+        return route.fulfill({ json: { updated_at: updatedAt } });
       }
       return route.fulfill({ json: [] });
     });
@@ -201,14 +222,14 @@ const deferred = () => {
     assert.equal(await nextMemo.inputValue(), "다음 달 원래 메모");
     await page.locator("button:has(svg.lucide-chevron-left)").click();
     await page.waitForFunction((label) => document.querySelector(`[aria-label="${label}"]`)?.value === "월 전환 직전 메모", `${month} 주요사항`);
-    assert.equal(memos.get(month), "월 전환 직전 메모");
+    assert.equal(memos.get(month).content, "월 전환 직전 메모");
 
     // An older slow save must finish before the newest change is sent.
     const slowSave = deferred();
     holdSave = slowSave;
     const beforeSerial = memoWrites.length;
     await memo.fill("느린 첫 저장");
-    const firstRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().includes("/project_memos"));
+    const firstRequest = page.waitForRequest((request) => request.method() === "PATCH" && request.url().includes("/project_memos"));
     await memo.blur();
     await firstRequest;
     await memo.fill("마지막 저장 내용");
@@ -216,7 +237,7 @@ const deferred = () => {
     assert.equal(memoWrites.length, beforeSerial + 1, "The second write waits for the first.");
     slowSave.resolve();
     await page.getByText("저장됨", { exact: true }).waitFor();
-    assert.equal(memos.get(month), "마지막 저장 내용");
+    assert.equal(memos.get(month).content, "마지막 저장 내용");
     assert.equal(memoWrites.length, beforeSerial + 2);
 
     failSave = true;
@@ -227,7 +248,7 @@ const deferred = () => {
     failSave = false;
     await page.getByRole("button", { name: "다시 시도", exact: true }).click();
     await page.getByText("저장됨", { exact: true }).waitFor();
-    assert.equal(memos.get(month), "실패 후 재시도 메모");
+    assert.equal(memos.get(month).content, "실패 후 재시도 메모");
 
     // Restoring a deleted schedule updates the already open calendar.
     assert.equal(await page.getByRole("button", { name: "복구한 검토 일정", exact: true }).count(), 0);
@@ -239,11 +260,58 @@ const deferred = () => {
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "복구한 검토 일정", exact: true }).first().waitFor();
     assert.equal(await memo.inputValue(), "실패 후 재시도 메모", "Restoring keeps the calendar month and memo mounted.");
+
+    // Idle refresh: memo not focused and nothing pending, a teammate's text arrives on focus.
+    await memo.evaluate((el) => el.blur());
+    memos.set(month, { content: "동료가 새로 쓴 메모", updated_at: stamp() });
+    await fireFocus();
+    await page.waitForFunction((label) => document.querySelector(`[aria-label="${label}"]`)?.value === "동료가 새로 쓴 메모", `${month} 주요사항`);
+
+    // Conflict: a teammate saved after we read. Our text stays, theirs is shown read-only.
+    const conflictText = page.getByText("다른 팀원이 먼저 수정했습니다", { exact: true });
+    const peerBox = page.getByTestId("memo-peer");
+    const keepMine = page.getByRole("button", { name: "내 글로 저장", exact: true });
+    const usePeer = page.getByRole("button", { name: "동료 내용 사용", exact: true });
+    assert.equal(await keepMine.count(), 0, "Conflict buttons appear only during a conflict.");
+    memos.set(month, { content: "동료 글", updated_at: stamp() });
+    await memo.fill("내가 쓰던 글");
+    await memo.blur();
+    await conflictText.waitFor();
+    assert.equal(await memo.inputValue(), "내가 쓰던 글");
+    await peerBox.getByText("동료가 저장한 내용", { exact: true }).waitFor();
+    await peerBox.getByText("동료 글", { exact: true }).waitFor();
+    assert.equal(memos.get(month).content, "동료 글", "A stale save must not overwrite the teammate.");
+    await keepMine.click();
+    await page.getByText("저장됨", { exact: true }).waitFor();
+    assert.equal(memos.get(month).content, "내가 쓰던 글");
+    assert.equal(await peerBox.count(), 0);
+    assert.equal(await keepMine.count(), 0);
+    // Second conflict, this time take the teammate's text.
+    memos.set(month, { content: "동료 글 두 번째", updated_at: stamp() });
+    await memo.fill("버릴 내 글");
+    await memo.blur();
+    await conflictText.waitFor();
+    const writesBeforeUsePeer = memoWrites.length;
+    await usePeer.click();
+    await page.waitForFunction((label) => document.querySelector(`[aria-label="${label}"]`)?.value === "동료 글 두 번째", `${month} 주요사항`);
+    await usePeer.waitFor({ state: "hidden" });
+    assert.equal(memos.get(month).content, "동료 글 두 번째");
+    assert.equal(memoWrites.length, writesBeforeUsePeer, "Taking the teammate's text writes nothing.");
+
+    // Height: a long memo scrolls inside a capped textarea and the header counts lines.
+    await memo.fill(Array.from({ length: 100 }, (_, i) => `${i + 1}번째 줄`).join("\n"));
+    await memo.blur();
+    await page.getByText("저장됨", { exact: true }).waitFor();
+    await page.getByText("100줄", { exact: true }).waitFor();
+    const box = await memo.boundingBox();
+    assert.ok(box && box.height <= 242, `Memo textarea must stay short, got ${box && box.height}px.`);
+    assert.equal(memos.get(month).content.split("\n").length, 100);
+    assert.ok(memoSelects.length > 0 && memoSelects.every((select) => select.includes("content") && select.includes("updated_at")), `Memo reads must select content and updated_at: ${memoSelects.join(" | ")}`);
     await page.getByRole("button", { name: "설계보고서.hwp", exact: true }).click();
     await actor.waitFor();
     assert.equal(await actor.inputValue(), "", "A reloaded log keeps the cleared actor.");
     assert.deepEqual(errors, []);
-    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing.");
+    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, memo idle refresh, memo conflict keep-mine/use-peer, capped memo height.");
   } finally {
     await browser.close();
   }

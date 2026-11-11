@@ -271,32 +271,69 @@ export async function deleteSchedule(id: string): Promise<void> {
 
 // ------------------------------------------------------------- month memo
 
-/** 과업 x 월 고정 메모. 없으면 빈 문자열 */
-export async function getMemo(projectId: string, month: string): Promise<string> {
+/** Month memo text plus the updated_at we read; updatedAt null = no row yet. */
+export interface MemoSnapshot {
+  content: string;
+  updatedAt: string | null;
+}
+
+/** A teammate saved first; `latest` is what is stored now. */
+export class MemoConflictError extends Error {
+  readonly latest: MemoSnapshot;
+
+  constructor(latest: MemoSnapshot) {
+    super("다른 팀원이 먼저 수정했습니다");
+    this.name = "MemoConflictError";
+    this.latest = latest;
+  }
+}
+
+/** 과업 x 월 고정 메모. 없으면 빈 문자열 + updatedAt null */
+export async function getMemoSnapshot(projectId: string, month: string): Promise<MemoSnapshot> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("project_memos")
-    .select("content")
+    .select("content,updated_at")
     .eq("project_id", projectId)
     .eq("month", month)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  return data?.content ?? "";
+  return { content: data?.content ?? "", updatedAt: data?.updated_at ?? null };
 }
 
-export async function saveMemo(
+/**
+ * Save only if the row still has the updated_at we read (`base`).
+ * Returns the new updated_at; throws MemoConflictError when a teammate saved first.
+ */
+export async function saveMemoChecked(
   projectId: string,
   month: string,
   content: string,
-): Promise<void> {
+  base: string | null,
+): Promise<string> {
   const supabase = createClient();
-  const { error } = await supabase
+  const updatedAt = new Date().toISOString();
+  if (base === null) {
+    const { data, error } = await supabase
+      .from("project_memos")
+      .insert({ project_id: projectId, month, content, updated_at: updatedAt })
+      .select("updated_at")
+      .single();
+    if (error?.code === "23505") throw new MemoConflictError(await getMemoSnapshot(projectId, month));
+    if (error) throw new Error(error.message);
+    return data.updated_at;
+  }
+  const { data, error } = await supabase
     .from("project_memos")
-    .upsert(
-      { project_id: projectId, month, content, updated_at: new Date().toISOString() },
-      { onConflict: "project_id,month" },
-    );
+    .update({ content, updated_at: updatedAt })
+    .eq("project_id", projectId)
+    .eq("month", month)
+    .eq("updated_at", base)
+    .select("updated_at")
+    .maybeSingle();
   if (error) throw new Error(error.message);
+  if (!data) throw new MemoConflictError(await getMemoSnapshot(projectId, month));
+  return data.updated_at;
 }
 
 // ------------------------------------------------------------------- trash

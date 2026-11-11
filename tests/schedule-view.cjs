@@ -75,4 +75,22 @@ for (const [key, value] of [["title", "u"], ["due_date", "2026-11-12"], ["assign
   assert.equal(sv.sameSchedules([row("a")], [row("a", { [key]: value })]), false, `${key} change must count.`);
 }
 
-console.log("PASS: capCell cap/hidden count, splitMonthItems open-by-date and done, isOverdue only for past not-done items, shouldRefreshSchedules gate, sameSchedules field/order compare.");
+// shouldRefreshMemo: visible page, nothing waiting to save, calm status, textarea not focused.
+const calm = { visible: true, pending: false, status: "idle", focused: false };
+assert.equal(sv.shouldRefreshMemo(calm), true);
+assert.equal(sv.shouldRefreshMemo({ ...calm, status: "saved" }), true);
+assert.equal(sv.shouldRefreshMemo({ ...calm, visible: false }), false);
+assert.equal(sv.shouldRefreshMemo({ ...calm, pending: true }), false);
+assert.equal(sv.shouldRefreshMemo({ ...calm, focused: true }), false);
+for (const status of ["saving", "conflict", "error"]) {
+  assert.equal(sv.shouldRefreshMemo({ ...calm, status }), false, `${status} must block the refresh.`);
+}
+
+// memoLineCount: empty text has no lines; a trailing newline starts a new line.
+assert.equal(sv.memoLineCount(""), 0);
+assert.equal(sv.memoLineCount("한 줄"), 1);
+assert.equal(sv.memoLineCount("가\n나"), 2);
+assert.equal(sv.memoLineCount("가\r\n나\n"), 3);
+assert.equal(sv.memoLineCount(Array(100).fill("x").join("\n")), 100);
+
+console.log("PASS: capCell cap/hidden count, splitMonthItems open-by-date and done, isOverdue only for past not-done items, shouldRefreshSchedules gate, sameSchedules field/order compare, shouldRefreshMemo gate, memoLineCount.");

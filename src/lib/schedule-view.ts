@@ -48,7 +48,25 @@ export function shouldRefreshSchedules(state: {
   return state.visible && !state.editing && state.mutating === 0;
 }
 
-const SAME_KEYS = ["id", "title", "due_date", "assignee", "note", "color", "done"] as const;
+export type MemoStatus = "idle" | "saving" | "saved" | "error" | "conflict";
+
+/** Refresh the month memo only when nothing of ours could be overwritten. */
+export function shouldRefreshMemo(state: {
+  visible: boolean;
+  pending: boolean;
+  status: MemoStatus;
+  focused: boolean;
+}): boolean {
+  const busy = state.status === "saving" || state.status === "conflict" || state.status === "error";
+  return state.visible && !state.pending && !busy && !state.focused;
+}
+
+/** Number of lines shown in the memo; empty text has none. */
+export function memoLineCount(text: string): number {
+  return text === "" ? 0 : text.split("\n").length;
+}
+
+const SAME_KEYS =["id", "title", "due_date", "assignee", "note", "color", "done"] as const;
 type ComparableSchedule = { [K in (typeof SAME_KEYS)[number]]: unknown };
 
 /** True when both lists hold the same rows in the same order (shown fields only). */
