@@ -30,6 +30,11 @@ const deferred = () => {
     const nodes = [{ id: "n1", project_id: "p1", parent_id: null, name: "설계보고서.hwp", kind: "file", sort_order: 0, created_at: today, deleted_at: null }];
     const logs = [{ id: "l1", node_id: "n1", action: "받음", actor: "김담당", counterpart: null, occurred_on: today, subject: "검토본", detail: null, didas_uploaded: false, created_at: today, deleted_at: null }];
     const schedules = [{ id: "s1", project_id: "p1", title: "복구한 검토 일정", due_date: today, assignee: null, note: null, color: "yellow", done: false, created_at: today, deleted_at: new Date().toISOString() }];
+    // Five live items on today (one done) exercise the 3-per-cell cap and the month todo fold.
+    // s1 stays index 0 so it is the first item drawn once restored.
+    ["오늘 일정 1", "오늘 일정 2", "오늘 일정 3", "오늘 일정 4", "오늘 완료 일정"].forEach((title, i) => {
+      schedules.push({ id: `t${i + 1}`, project_id: "p1", title, due_date: today, assignee: null, note: null, color: "blue", done: i === 4, created_at: today, deleted_at: null });
+    });
     const memos = new Map([[month, "이번 달 원래 메모"], [nextMonth, "다음 달 원래 메모"]]);
     const memoWrites = [];
     const logWrites = [];
@@ -64,8 +69,10 @@ const deferred = () => {
       }
       if (table === "schedules") {
         if (method === "PATCH") {
-          Object.assign(schedules[0], body);
-          return route.fulfill({ json: schedules[0] });
+          const row = schedules.find((s) => `eq.${s.id}` === url.searchParams.get("id"));
+          if (!row) return route.fulfill({ status: 404, json: { message: "no schedule row" } });
+          Object.assign(row, body);
+          return route.fulfill({ json: row });
         }
         return route.fulfill({ json: schedules.filter((row) => Boolean(row.deleted_at) === deleted) });
       }
@@ -121,6 +128,29 @@ const deferred = () => {
     await memo.waitFor();
     await page.waitForFunction((label) => !document.querySelector(`[aria-label="${label}"]`).disabled, `${month} 주요사항`);
     assert.equal(await memo.inputValue(), "이번 달 원래 메모");
+
+    // A busy day shows 3 items plus a fold control that must not open the add dialog.
+    const todayCell = page.locator(`[data-day="${today}"]`);
+    await todayCell.getByRole("checkbox").first().waitFor();
+    assert.equal(await todayCell.getByRole("checkbox").count(), 3);
+    await todayCell.getByRole("button", { name: "+2건 더 보기", exact: true }).click();
+    await todayCell.getByRole("button", { name: "접기", exact: true }).waitFor();
+    assert.equal(await todayCell.getByRole("checkbox").count(), 5);
+    assert.equal(await page.getByRole("dialog").count(), 0, "Expanding a day must not open the add dialog.");
+    await todayCell.getByRole("button", { name: "접기", exact: true }).click();
+    await todayCell.getByRole("button", { name: "+2건 더 보기", exact: true }).waitFor();
+    assert.equal(await page.getByRole("dialog").count(), 0, "Folding a day must not open the add dialog.");
+
+    // Month todo lists only open items; done ones sit behind a fold.
+    const monthTodo = page.getByTestId("month-todo");
+    assert.equal(await monthTodo.getByRole("checkbox").count(), 4);
+    assert.equal(await monthTodo.getByText("오늘 완료 일정", { exact: true }).count(), 0);
+    assert.equal(await monthTodo.locator('[data-overdue="true"]').count(), 0);
+    await monthTodo.getByRole("button", { name: "완료 1건 보기", exact: true }).click();
+    await monthTodo.getByText("오늘 완료 일정", { exact: true }).waitFor();
+    assert.equal(await monthTodo.getByRole("checkbox").count(), 5);
+    await monthTodo.getByRole("button", { name: "완료 1건 숨기기", exact: true }).click();
+    await monthTodo.getByRole("button", { name: "완료 1건 보기", exact: true }).waitFor();
 
     // Leaving before the debounce expires saves the original month. The next
     // month stays empty and disabled until its own data arrives.
@@ -181,7 +211,7 @@ const deferred = () => {
     await actor.waitFor();
     assert.equal(await actor.inputValue(), "", "A reloaded log keeps the cleared actor.");
     assert.deepEqual(errors, []);
-    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh.");
+    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold.");
   } finally {
     await browser.close();
   }

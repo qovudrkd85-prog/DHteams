@@ -19,10 +19,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import * as api from "@/lib/queries";
+import { capCell, isOverdue, splitMonthItems } from "@/lib/schedule-view";
 import { STICKY_COLORS, type Schedule, type StickyColor } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+const DAY_CELL_LIMIT = 3;
+const MONTH_TODO_LIMIT = 12;
 
 const COLOR_CLASS: Record<StickyColor, string> = {
   yellow: "bg-yellow-100 border-yellow-300 text-yellow-950",
@@ -88,6 +91,9 @@ export function ScheduleCalendar({
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [edit, setEdit] = useState<EditState | null>(null);
   const [loading, setLoading] = useState(true);
+  const [expandedDay, setExpandedDay] = useState<string | null>(null);
+  const [showAllTodo, setShowAllTodo] = useState(false);
+  const [showDone, setShowDone] = useState(false);
 
   const reload = useCallback(
     () =>
@@ -187,10 +193,12 @@ export function ScheduleCalendar({
     }
   }
 
-  const shiftMonth = (delta: number) =>
+  const shiftMonth = (delta: number) => {
+    setExpandedDay(null);
     setMonth(
       (prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1),
     );
+  };
 
   const openCreate = (dueDate: string) =>
     setEdit({
@@ -203,6 +211,63 @@ export function ScheduleCalendar({
     });
 
   const todayKey = toKey(new Date());
+  const monthSplit = splitMonthItems(monthItems, todayKey);
+  const monthOpen = capCell(
+    monthSplit.open,
+    showAllTodo ? Infinity : MONTH_TODO_LIMIT,
+  );
+
+  const renderTodo = (item: Schedule) => {
+    const overdue = isOverdue(item, todayKey);
+    return (
+      <li
+        key={item.id}
+        data-overdue={overdue ? "true" : undefined}
+        className={cn(
+          "flex w-52 items-start gap-2 rounded-md border px-2 py-1.5 text-xs shadow-sm",
+          COLOR_CLASS[item.color],
+          item.done && "opacity-60",
+        )}
+      >
+        <Checkbox
+          className="mt-0.5 size-3.5"
+          checked={item.done}
+          onCheckedChange={() => toggleDone(item)}
+          aria-label="완료"
+        />
+        <button
+          type="button"
+          className="min-w-0 flex-1 text-left"
+          onClick={() =>
+            setEdit({
+              mode: "edit",
+              target: item,
+              title: item.title,
+              assignee: item.assignee ?? "",
+              note: item.note ?? "",
+              color: item.color,
+            })
+          }
+        >
+          <span
+            className={cn(
+              "block truncate font-medium",
+              item.done && "line-through",
+            )}
+          >
+            {item.title}
+          </span>
+          <span className="block text-[11px] opacity-70">
+            <span className={cn(overdue && "font-medium text-rose-700")}>
+              {item.due_date.slice(5).replace("-", "/")}
+              {overdue ? " 지남" : ""}
+            </span>
+            {item.assignee ? ` · ${item.assignee}` : ""}
+          </span>
+        </button>
+      </li>
+    );
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -242,7 +307,10 @@ export function ScheduleCalendar({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setMonth(new Date())}
+          onClick={() => {
+            setExpandedDay(null);
+            setMonth(new Date());
+          }}
         >
           오늘
         </Button>
@@ -266,10 +334,13 @@ export function ScheduleCalendar({
           const key = toKey(date);
           const inMonth = date.getMonth() === month.getMonth();
           const items = byDate.get(key) ?? [];
+          const expanded = expandedDay === key;
+          const cell = capCell(items, expanded ? Infinity : DAY_CELL_LIMIT);
 
           return (
             <div
               key={key}
+              data-day={key}
               className={cn(
                 "group min-h-24 cursor-pointer bg-background p-1 text-left align-top transition-colors hover:bg-accent/40",
                 !inMonth && "bg-muted/40 text-muted-foreground",
@@ -299,7 +370,7 @@ export function ScheduleCalendar({
               </button>
 
               <div className="space-y-1">
-                {items.map((item) => (
+                {cell.shown.map((item) => (
                   <div
                     key={item.id}
                     className={cn(
@@ -341,6 +412,19 @@ export function ScheduleCalendar({
                     </button>
                   </div>
                 ))}
+                {cell.hidden > 0 || expanded ? (
+                  <button
+                    type="button"
+                    className="w-full rounded px-1 text-left text-[11px] text-muted-foreground hover:bg-accent"
+                    onClick={(event) => {
+                      // A cell click opens the add dialog; keep it closed.
+                      event.stopPropagation();
+                      setExpandedDay(expanded ? null : key);
+                    }}
+                  >
+                    {expanded ? "접기" : `+${cell.hidden}건 더 보기`}
+                  </button>
+                ) : null}
               </div>
             </div>
           );
@@ -350,11 +434,14 @@ export function ScheduleCalendar({
       <MonthMemo projectId={projectId} month={monthKey} />
 
       {/* 이번 달 포스트잇 모아보기 */}
-      <section className="rounded-lg border bg-background p-3">
+      <section
+        className="rounded-lg border bg-background p-3"
+        data-testid="month-todo"
+      >
         <h3 className="mb-2 text-sm font-medium">
           이번 달 할 일{" "}
           <span className="text-xs font-normal text-muted-foreground">
-            {monthItems.filter((s) => !s.done).length}건 남음 / 전체{" "}
+            {monthSplit.open.length}건 남음 / 전체{" "}
             {monthItems.length}건
           </span>
         </h3>
@@ -363,52 +450,40 @@ export function ScheduleCalendar({
             달력의 날짜를 클릭해 일정을 붙이세요.
           </p>
         ) : (
-          <ul className="flex flex-wrap gap-2">
-            {monthItems.map((item) => (
-              <li
-                key={item.id}
-                className={cn(
-                  "flex w-52 items-start gap-2 rounded-md border px-2 py-1.5 text-xs shadow-sm",
-                  COLOR_CLASS[item.color],
-                  item.done && "opacity-60",
-                )}
-              >
-                <Checkbox
-                  className="mt-0.5 size-3.5"
-                  checked={item.done}
-                  onCheckedChange={() => toggleDone(item)}
-                  aria-label="완료"
-                />
+          <div className="space-y-2">
+            {monthOpen.shown.length > 0 ? (
+              <ul className="flex flex-wrap gap-2">
+                {monthOpen.shown.map(renderTodo)}
+              </ul>
+            ) : null}
+            <div className="flex flex-wrap gap-2 text-xs">
+              {monthOpen.hidden > 0 || showAllTodo ? (
                 <button
                   type="button"
-                  className="min-w-0 flex-1 text-left"
-                  onClick={() =>
-                    setEdit({
-                      mode: "edit",
-                      target: item,
-                      title: item.title,
-                      assignee: item.assignee ?? "",
-                      note: item.note ?? "",
-                      color: item.color,
-                    })
-                  }
+                  className="rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent"
+                  onClick={() => setShowAllTodo((prev) => !prev)}
                 >
-                  <span
-                    className={cn(
-                      "block truncate font-medium",
-                      item.done && "line-through",
-                    )}
-                  >
-                    {item.title}
-                  </span>
-                  <span className="block text-[11px] opacity-70">
-                    {item.due_date.slice(5).replace("-", "/")}
-                    {item.assignee ? ` · ${item.assignee}` : ""}
-                  </span>
+                  {showAllTodo ? "접기" : `+${monthOpen.hidden}건 더 보기`}
                 </button>
-              </li>
-            ))}
-          </ul>
+              ) : null}
+              {monthSplit.done.length > 0 ? (
+                <button
+                  type="button"
+                  className="rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent"
+                  onClick={() => setShowDone((prev) => !prev)}
+                >
+                  {showDone
+                    ? `완료 ${monthSplit.done.length}건 숨기기`
+                    : `완료 ${monthSplit.done.length}건 보기`}
+                </button>
+              ) : null}
+            </div>
+            {showDone && monthSplit.done.length > 0 ? (
+              <ul className="flex flex-wrap gap-2">
+                {monthSplit.done.map(renderTodo)}
+              </ul>
+            ) : null}
+          </div>
         )}
       </section>
 
