@@ -17,6 +17,8 @@ const setupSql = `
   grant usage on schema public, auth to anon, authenticated, service_role;
 `;
 const schemas = ["schema", "schema-open-mode", "schema-update-all", "schema-trash", "schema-department-events", "schema-team-workspace", "schema-accounts", "schema-office-presence"];
+// --memberships: same checks with schema-team-memberships.sql installed (several teams per person).
+const membershipsMode = process.argv.includes("--memberships");
 const event = (title, visibility) => ({ title, visibility, starts_on: "2026-11-10", ends_on: "2026-11-10" });
 
 (async () => {
@@ -42,8 +44,12 @@ const event = (title, visibility) => ({ title, visibility, starts_on: "2026-11-1
     for (const schema of schemas) await db.exec(readSql(schema));
     await db.exec(readSql("schema-teams"));
     await db.exec(readSql("schema-teams"));
+    if (membershipsMode) {
+      await db.exec(readSql("schema-team-memberships"));
+      await db.exec(readSql("schema-team-memberships"));
+    }
     // Older SQL re-run after teams would reopen access: it must refuse and roll back.
-    for (const stale of ["schema-accounts", "schema-office-presence"]) {
+    for (const stale of ["schema-accounts", "schema-office-presence", ...(membershipsMode ? ["schema-teams"] : [])]) {
       await assert.rejects(db.exec(readSql(stale)), (error) => error.code === "P0001");
       await db.exec("rollback");
     }
@@ -72,7 +78,14 @@ const event = (title, visibility) => ({ title, visibility, starts_on: "2026-11-1
     const teamA = await one("select * from create_team(' A팀 ')");
     assert.equal(teamA.name, "A팀");
     assert.match(teamA.invite_code, /^[A-HJKMNP-Z2-9]{8}$/);
-    await rejects("select * from create_team('두 번째')", [], "23514");
+    if (membershipsMode) {
+      // Several teams per person: a second team is allowed, then come back to A.
+      const second = await one("select * from create_team('두 번째')");
+      assert.equal((await one("select public.current_team_id() as id")).id, second.id);
+      await one("select * from switch_team($1)", [teamA.id]);
+    } else {
+      await rejects("select * from create_team('두 번째')", [], "23514");
+    }
     const roomsA = await rows("select * from office_layouts order by room_key");
     assert.deepEqual(roomsA.map((room) => room.room_key), ["cafe", "office-1", "office-2", "office-3", "office-4", "outdoor"]);
     assert.ok(roomsA.every((room) => room.team_id === teamA.id));
@@ -199,7 +212,7 @@ const event = (title, visibility) => ({ title, visibility, starts_on: "2026-11-1
     for (let i = 0; i < 300; i += 1) codes.add((await one("select public.generate_team_invite_code() as c")).c);
     assert.ok(codes.size >= 299);
     for (const code of codes) assert.match(code, /^[A-HJKMNP-Z2-9]{8}$/);
-    console.log("PASS: team create/join/leave, invite code rules, cross-team isolation for projects/nodes/seats/presence/members, team vs private schedules, creator-only code rotation, repeatable SQL.");
+    console.log(`PASS${membershipsMode ? " (memberships)" : ""}: team create/join/leave, invite code rules, cross-team isolation for projects/nodes/seats/presence/members, team vs private schedules, creator-only code rotation, repeatable SQL.`);
   } finally {
     await db.close();
   }

@@ -9,7 +9,7 @@
     "lint": "eslint",
     "db:prepare": "node scripts/prepare-account-upgrade.cjs",
     "deploy:check": "node scripts/check-account-readiness.cjs",
-    "test:data": "node tests/team-workspace-data.cjs && node tests/account-data.cjs && node tests/office-presence-data.cjs && node tests/teams-data.cjs && node tests/team-memberships-data.cjs && node tests/healing.cjs && node tests/rooms.cjs && node tests/project-deadlines.cjs",
+    "test:data": "node tests/team-workspace-data.cjs && node tests/account-data.cjs && node tests/office-presence-data.cjs && node tests/teams-data.cjs && node tests/teams-data.cjs --memberships && node tests/team-memberships-data.cjs && node tests/healing.cjs && node tests/rooms.cjs && node tests/project-deadlines.cjs",
     "test:server": "node tests/account-server.cjs",
     "test:browser": "node scripts/test-browser.cjs"
   },
