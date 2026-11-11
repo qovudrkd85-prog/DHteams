@@ -30,12 +30,17 @@ const teamC = { id: "00000000-0000-4000-8000-0000000000cc", name: "현장지원�
         if (!target) return route.fulfill({ status: 403, json: { error: "소속된 팀으로만 바꿀 수 있습니다." } });
         state.otherTeams = all().filter((team) => team.id !== target.id && mine.includes(team));
         state.team = target;
+      } else if (input.action === "leave") {
+        // Move to the most recently joined remaining team.
+        const remaining = all().filter((team) => team !== state.team && state.otherTeams.includes(team));
+        state.team = remaining.at(-1) ?? null;
+        state.otherTeams = remaining.filter((team) => team !== state.team);
       } else if (input.action === "join") {
         if (input.code !== teamC.invite_code) return route.fulfill({ status: 404, json: { error: "초대코드에 맞는 팀이 없습니다." } });
         state.otherTeams = mine;
         state.team = teamC;
       }
-      const account = { id: state.account.id, username: state.account.username, member: state.account.member, team: state.team, teams: all().filter((team) => [state.team, ...state.otherTeams].includes(team)).map(({ id, name, is_owner }) => ({ id, name, is_owner })) };
+      const account = { id: state.account.id, username: state.account.username, member: state.account.member, team: state.team, teams: all().filter((team) => team && [state.team, ...state.otherTeams].includes(team)).map(({ id, name, is_owner }) => ({ id, name, is_owner })) };
       return route.fulfill({ json: { configured: true, authenticated: true, account } });
     });
     await context.route("**/rest/v1/**", (route) => {
@@ -86,6 +91,17 @@ const teamC = { id: "00000000-0000-4000-8000-0000000000cc", name: "현장지원�
     assert.equal(await menu.getByRole("menuitemradio", { name: /현장지원팀/ }).getAttribute("aria-checked"), "true");
     await page.keyboard.press("Escape");
     await menu.waitFor({ state: "hidden" });
+
+    // Leaving one of several teams (settings > team): the dialog closes and the remaining team opens.
+    await header.getByRole("button", { name: "내 설정", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "내 설정" });
+    await dialog.getByRole("button", { name: "팀", exact: true }).click();
+    await dialog.getByRole("button", { name: "팀 나가기", exact: true }).click();
+    await dialog.getByText(/남은 다른 팀으로 이동합니다/).waitFor();
+    await dialog.getByRole("button", { name: "팀 나가기", exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+    await header.getByRole("button", { name: /^팀 바꾸기/ }).filter({ hasText: "설계2팀" }).waitFor();
+    assert.deepEqual(teamCalls.at(-1), { action: "leave" });
 
     // Phone width: the menu stays inside the screen.
     await page.setViewportSize({ width: 375, height: 760 });

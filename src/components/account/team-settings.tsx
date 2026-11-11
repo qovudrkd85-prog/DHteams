@@ -16,7 +16,8 @@ interface TeamSettingsProps {
 const formatCode = (code: string): string => `${code.slice(0, 4)}-${code.slice(4)}`;
 
 export function TeamSettings({ team, busy, setBusy }: TeamSettingsProps) {
-  const { teamAction, setSettingsOpen } = useAccount();
+  const { account, teamAction, setSettingsOpen } = useAccount();
+  const otherTeams = (account?.teams ?? []).filter((item) => item.id !== team.id).length;
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +28,9 @@ export function TeamSettings({ team, busy, setBusy }: TeamSettingsProps) {
       await teamAction({ action });
       if (action === "leave") {
         setSettingsOpen(false);
-        toast.success(`${team.name} 팀에서 나왔습니다. 내 개인 일정은 그대로 남아 있습니다.`);
+        toast.success(otherTeams > 0
+          ? `${team.name} 팀에서 나왔습니다. 남은 다른 팀으로 이동했습니다.`
+          : `${team.name} 팀에서 나왔습니다. 내 개인 일정은 그대로 남아 있습니다.`);
       } else {
         toast.success("새 초대코드를 만들었습니다. 이전 코드로는 더 이상 참가할 수 없습니다.");
       }
@@ -52,7 +55,7 @@ export function TeamSettings({ team, busy, setBusy }: TeamSettingsProps) {
     <div className="space-y-4 pb-1">
       <div className="rounded-xl bg-[#f1f6f1] p-3">
         <p className="text-xs text-slate-500">현재 팀</p>
-        <p className="mt-1 truncate text-sm font-semibold text-teal-900">{team.name}{team.is_owner && <span className="ml-2 rounded bg-teal-100 px-1.5 py-0.5 text-[11px] font-medium text-teal-800">만든 사람</span>}</p>
+        <p className="mt-1 truncate text-sm font-semibold text-teal-900">{team.name}{team.is_owner && <span className="ml-2 rounded bg-teal-100 px-1.5 py-0.5 text-[11px] font-medium text-teal-800">팀장</span>}</p>
       </div>
       <div className="space-y-2">
         <p className="text-sm font-medium">초대코드</p>
@@ -66,7 +69,7 @@ export function TeamSettings({ team, busy, setBusy }: TeamSettingsProps) {
       <div className="space-y-2 border-t pt-4">
         {confirmLeave ? (
           <div className="space-y-2 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900" role="alert">
-            <p>팀을 나가면 이 팀의 과업·사무실·팀 일정을 볼 수 없고, 내 자리도 비워집니다. 다시 들어오려면 초대코드가 필요합니다. 내 개인 일정은 남습니다.</p>
+            <p>팀을 나가면 이 팀의 과업·사무실·팀 일정을 볼 수 없고, 이 팀의 내 자리도 비워집니다. 다시 들어오려면 초대코드가 필요합니다. 내 개인 일정은 남습니다.{otherTeams > 0 ? " 나간 뒤에는 남은 다른 팀으로 이동합니다." : ""}{team.is_owner ? " 팀장이 나가면 가장 오래된 팀원이 팀장이 됩니다." : ""}</p>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setConfirmLeave(false)}>취소</Button>
               <Button type="button" size="sm" disabled={busy} className="bg-red-700 text-white hover:bg-red-800" onClick={() => void run("leave")}>{busy && <LoaderCircle className="size-3.5 animate-spin" />}팀 나가기</Button>
