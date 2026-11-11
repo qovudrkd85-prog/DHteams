@@ -4,6 +4,15 @@
 -- 팀이 정해지지 않은 기존 행(과업·방·일정)은 보존되지만 어느 팀에도 보이지 않습니다.
 begin;
 
+-- Re-running this file after schema-team-memberships.sql would restore the one-team rules. Stop instead.
+do $$
+begin
+  if to_regclass('public.team_memberships') is not null then
+    raise exception '여러 팀 소속(schema-team-memberships.sql)이 설치된 DB입니다. 이 파일만 다시 실행하면 팀 규칙이 옛날로 돌아갑니다. 실행을 중단했습니다.' using errcode = 'P0001';
+  end if;
+end;
+$$;
+
 create table if not exists public.teams (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(btrim(name)) between 1 and 40),
