@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { LoaderCircle, RotateCw, Users } from "lucide-react";
 
 import { claimOfficeSeat } from "@/lib/team/presence";
@@ -8,8 +8,9 @@ import { pickTeamRoom, withOwnDesk } from "@/lib/team/rooms";
 import { useOfficePresence } from "@/lib/team/use-office-presence";
 import {
   listOfficeLayouts, officeDateKey, saveOfficeLayout,
-  type Attendance, type OfficeLayout, type TeamMember,
+  type Attendance, type OfficeLayout, type TeamMember, type TeamPresence,
 } from "@/lib/team/workspace";
+import { WalkingCharacter } from "./character";
 import { FurnitureArt } from "./office";
 import styles from "./office.module.css";
 import { WorldArt } from "./world-art";
@@ -20,13 +21,15 @@ interface TeamRoomMiniProps {
   currentMember: TeamMember | null;
 }
 
+// The room is ~1600 units wide but shown ~340px wide: draw characters larger so they stay readable.
+const CHARACTER_SCALE = 1.8;
 const NO_ROOM = "팀 방이 아직 없어요. 관리자에게 팀 방 준비를 요청해 주세요.";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "팀 방을 불러오지 못했어요.";
 }
 
-/** One room per team: a desk per member, sit/stand only. Walking, portals and decorating are not offered here. */
+/** One room per team: a desk per member. Walk by tapping the floor or with arrow keys; portals and decorating are not offered here. */
 export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMiniProps) {
   const patternId = useId().replace(/:/g, "");
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -128,6 +131,27 @@ export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMin
   const width = room?.canvas_width ?? 1000;
   const height = room?.canvas_height ?? 560;
   const desks = room?.items.filter((item) => item.kind === "desk") ?? [];
+  // Status bubbles are clamped for an unscaled room, so the scaled mini characters go without them.
+  const walker = (member: TeamMember, presence: TeamPresence, own: boolean) => (
+    <g key={presence.member_id} transform={`translate(${presence.x} ${presence.y}) scale(${CHARACTER_SCALE}) translate(${-presence.x} ${-presence.y})`}
+      data-testid={own ? "team-room-me" : `team-room-walker-${member.id}`} data-x={presence.x} data-y={presence.y}>
+      <WalkingCharacter member={{ ...member, status_message: undefined }} presence={presence} roomWidth={width} own={own} moving={own && game.moving} working={presentIds.has(member.id)} />
+    </g>
+  );
+  const standingPeers = livePeers.filter((row) => row.motion !== "seated").sort((a, b) => a.y - b.y);
+
+  function walkHere(event: MouseEvent<SVGSVGElement>): void {
+    const ctm = event.currentTarget.getScreenCTM();
+    if (!ctm || ctm.a === 0 || ctm.d === 0) return;
+    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
+    viewportRef.current?.focus({ preventScroll: true });
+    game.walkTo({ x: point.x, y: point.y });
+  }
+
+  function onRoomKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+    if (event.key === "Escape" && event.target === event.currentTarget) { event.currentTarget.blur(); return; }
+    game.onKeyDown(event);
+  }
 
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-label="팀 방" data-testid="team-room">
@@ -144,8 +168,9 @@ export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMin
       {loading ? (
         <div className="flex items-center justify-center gap-2 p-8 text-sm text-slate-500"><LoaderCircle className="size-4 animate-spin" /> 팀 방을 준비하고 있어요.</div>
       ) : room ? (
-        <div ref={viewportRef} className={`${styles.scene} ${styles[room.theme] ?? ""}`} style={{ padding: "0 8px", background: "transparent" }}>
-          <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full rounded-xl" role="img" aria-label={`팀 방. 책상 ${desks.length}개, 접속 ${online.length}명.`}>
+        <div ref={viewportRef} className={`${styles.scene} ${styles[room.theme] ?? ""} rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-teal-500`} style={{ padding: "0 8px", background: "transparent" }}
+          tabIndex={0} role="group" aria-label="팀 방. 방향키로 걷기" data-testid="team-room-view" onKeyDown={onRoomKeyDown} onKeyUp={game.onKeyUp}>
+          <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full cursor-pointer rounded-xl" role="img" onClick={walkHere} aria-label={`팀 방. 책상 ${desks.length}개, 접속 ${online.length}명.`}>
             <WorldArt width={width} height={height} kind="office" patternId={patternId} editing={false} />
             {desks.map((item) => {
               const member = item.member_id ? memberById.get(item.member_id) : undefined;
@@ -162,11 +187,17 @@ export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMin
                 </g>
               );
             })}
+            {standingPeers.map((row) => {
+              const member = memberById.get(row.member_id);
+              return member ? walker(member, row, false) : null;
+            })}
+            {currentMember && game.player && !seated && walker(currentMember, game.player, true)}
           </svg>
         </div>
       ) : null}
       {(actionError ?? loadError) && <div className={styles.error} role="alert"><p>{actionError ?? loadError}</p>{!room && <button type="button" onClick={() => { setLoading(true); void load(); }}><RotateCw size={14} /> 다시 불러오기</button>}</div>}
       {game.syncError && <p className="px-4 pt-2 text-xs text-amber-700" role="status">{game.syncError}</p>}
+      {room && <p className="px-4 pt-3 text-xs text-slate-400">방을 누르거나 방향키로 걸어요.</p>}
       <div className="flex gap-2 p-4">
         {seated ? (
           <button type="button" className={styles.quietButton} onClick={() => game.stand()} data-testid="team-room-stand">일어나기</button>

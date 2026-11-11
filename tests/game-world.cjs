@@ -61,6 +61,63 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     await page.getByTestId("team-room-stand").click();
     await sit.waitFor();
 
+    // Team room walking: arrow keys only while the room has focus, tap/click walks there, furniture blocks, sitting stops walking.
+    const roomView = page.getByTestId("team-room-view");
+    const meInRoom = page.getByTestId("team-room-me");
+    await meInRoom.waitFor();
+    const roomSpot = async () => ({ x: Number(await meInRoom.getAttribute("data-x")), y: Number(await meInRoom.getAttribute("data-y")) });
+    const settled = async () => {
+      let last = await roomSpot();
+      for (let attempt = 0; attempt < 40; attempt++) {
+        await page.waitForTimeout(150);
+        const now = await roomSpot();
+        if (now.x === last.x && now.y === last.y) return now;
+        last = now;
+      }
+      throw new Error("Team room character never stopped.");
+    };
+    const roomPoint = (x, y) => page.evaluate(([rx, ry]) => {
+      const svg = document.querySelector("[data-testid=team-room-view] svg");
+      const point = new DOMPoint(rx, ry).matrixTransform(svg.getScreenCTM());
+      return { x: point.x, y: point.y };
+    }, [x, y]);
+    assert.ok(Number.isFinite((await roomSpot()).x), "Standing me must be drawn in the team room.");
+    const typed = await roomSpot();
+    await panel.getByLabel("내 상태 메시지", { exact: true }).focus();
+    await page.keyboard.down("ArrowRight");
+    await page.waitForTimeout(400);
+    await page.keyboard.up("ArrowRight");
+    assert.equal((await roomSpot()).x, typed.x, "Arrow keys in another field must not walk.");
+    await roomView.focus();
+    const scrolled = await page.evaluate(() => window.scrollY);
+    const keyed = await roomSpot();
+    await page.keyboard.down("ArrowRight");
+    await page.waitForFunction((start) => Number(document.querySelector("[data-testid=team-room-me]")?.getAttribute("data-x")) > start + 20, keyed.x);
+    await page.keyboard.up("ArrowRight");
+    assert.equal(await page.evaluate(() => window.scrollY), scrolled, "Arrow keys in the room must not scroll the page.");
+    await roomView.scrollIntoViewIfNeeded();
+    const floor = await roomPoint(1200, 800);
+    const clicked = await settled();
+    await page.mouse.click(floor.x, floor.y);
+    await page.waitForFunction(([x, y]) => {
+      const me = document.querySelector("[data-testid=team-room-me]");
+      return Number(me?.getAttribute("data-x")) !== x || Number(me?.getAttribute("data-y")) !== y;
+    }, [clicked.x, clicked.y]);
+    const arrived = await settled();
+    assert.ok(Math.hypot(arrived.x - 1200, arrived.y - 800) < 10, `Clicking free floor must walk there (got ${arrived.x},${arrived.y}).`);
+    const deskSpot = await roomPoint(650, 250);
+    await page.mouse.click(deskSpot.x, deskSpot.y);
+    const stopped = await settled();
+    assert.ok(Math.abs(stopped.x - 650) >= 62 + 8 || Math.abs(stopped.y - 250) >= 28 + 6, `Clicking a desk must not walk into it (got ${stopped.x},${stopped.y}).`);
+    await sit.click();
+    await meInRoom.waitFor({ state: "detached" });
+    await page.waitForFunction((memberId) => document.querySelector(`[data-testid^="team-desk-"][data-member-id="${memberId}"]`)?.getAttribute("data-seated") === "true", me.id);
+    await roomView.focus();
+    await page.keyboard.down("ArrowDown");
+    await sit.waitFor();
+    await page.keyboard.up("ArrowDown");
+    await meInRoom.waitFor();
+
     // The chosen tab survives a reload.
     await openTab("garage");
     await page.getByTestId("garage").waitFor();
@@ -136,6 +193,14 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     await openTab("team");
     await page.getByTestId("team-room").waitFor();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "Team tab must fit the mobile width.");
+    // Mobile: a tap on the team room floor walks me there.
+    await meInRoom.waitFor();
+    const phoneStart = await settled();
+    await page.getByTestId("team-room-view").scrollIntoViewIfNeeded();
+    const phoneFloor = await roomPoint(400, 800);
+    await page.mouse.click(phoneFloor.x, phoneFloor.y);
+    await page.waitForFunction((x) => Number(document.querySelector("[data-testid=team-room-me]")?.getAttribute("data-x")) !== x, phoneStart.x);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "Walking must not widen the mobile page.");
     await page.screenshot({ path: path.resolve("artifacts", "game-world-mobile.png"), fullPage: true });
     assert.deepEqual(errors, []);
     console.log("PASS: inline team calendar and room, other member seated, status retry, sit once/stand, tab memory across reload, garage -> inline healing (weather start zone, fast travel, walk to rod, seam walk, Esc back, status restore), no healing after team tab trip, mobile width + tap to walk.");
