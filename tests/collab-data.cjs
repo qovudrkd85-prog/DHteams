@@ -145,9 +145,49 @@ async function memoItemSuite() {
   }
 }
 
+// D9: schedules.kind + sort_order for week-board blocks.
+async function blockSuite() {
+  const { db, one, rows, rejects, session, admin, projectA } = await openDb();
+  try {
+    await db.exec(readSql("schema-schedules-updated-at"));
+    const legacy = await one("insert into schedules(project_id,title,due_date) values ($1,'기존 일정','2026-11-20') returning id", [projectA.id]);
+    await db.exec(readSql("schema-schedule-blocks"));
+    await db.exec(readSql("schema-schedule-blocks"));
+    const filled = await one("select kind, sort_order, updated_at::text as t from schedules where id = $1", [legacy.id]);
+    assert.equal(filled.kind, "todo", "existing row kind = todo");
+    assert.equal(filled.sort_order, 0, "existing row sort_order = 0");
+
+    await session(ids.alice);
+    await rejects("insert into schedules(project_id,title,due_date,kind) values ($1,'잘못','2026-11-20','h9')", [projectA.id], "23514");
+    const heading = await one("insert into schedules(project_id,title,due_date,kind,sort_order) values ($1,'제목','2026-11-20','h1',1.5) returning id, kind, sort_order", [projectA.id]);
+    assert.equal(heading.kind, "h1");
+    assert.equal(heading.sort_order, 1.5);
+    const byKind = await one("update schedules set kind = 'text' where id = $1 returning updated_at::text as t", [legacy.id]);
+    const byOrder = await one("update schedules set sort_order = 2.25 where id = $1 returning updated_at::text as t", [legacy.id]);
+    assert.equal((await one("select $1::timestamptz < $2::timestamptz and $2::timestamptz < $3::timestamptz as ok", [filled.t, byKind.t, byOrder.t])).ok, true, "kind/sort_order update increases updated_at");
+
+    await session(ids.carol);
+    assert.equal((await rows("select id from schedules")).length, 0, "other team sees no block rows");
+    await admin();
+
+    // Rollback is single-run by design (its update references kind).
+    await db.exec(readSql("rollback-schedule-blocks"));
+    const cols = await rows("select column_name from information_schema.columns where table_schema = 'public' and table_name = 'schedules' and column_name in ('kind','sort_order')");
+    assert.equal(cols.length, 0, "rollback drops kind and sort_order");
+    assert.equal((await one("select count(*)::int as n from pg_indexes where indexname = 'schedules_day_order_idx'")).n, 0);
+    const after = await rows("select id, deleted_at from schedules order by created_at");
+    assert.equal(after.find((r) => r.id === heading.id).deleted_at !== null, true, "block rows go to trash on rollback");
+    assert.equal(after.find((r) => r.id === legacy.id).deleted_at !== null, true, "row changed to text goes to trash on rollback");
+  } finally {
+    await db.close();
+  }
+}
+
 (async () => {
   await scheduleSuite();
   await memoItemSuite();
+  await blockSuite();
   console.log("PASS: schedules.updated_at (repeatable SQL, existing rows filled, increases per update, stale condition matches 0 rows, other team cannot update).");
   console.log("PASS: project_memo_items (repeatable migration without duplicates, line order, server-stamped author, pinned columns on update, team isolation, no hard delete, rollback).");
+  console.log("PASS: schedules.kind/sort_order (repeatable SQL, existing rows todo/0, bad kind rejected 23514, updates bump updated_at, team isolation, rollback trashes blocks and drops columns).");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

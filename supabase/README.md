@@ -70,6 +70,8 @@ SQL Editor에서 각 단계의 성공을 확인한 후 다음 단계를 실행�
 | `schema-schedules-updated-at.sql` | 과업 일정 동시 수정 충돌 검사(updated_at·자동 갱신). `schema-teams.sql` 뒤 적용 |
 | `schema-memo-items.sql` | 월 주요사항 한 줄 = 한 항목, 기존 월 메모 옮김(원본 유지). `schema-schedules-updated-at.sql` 다음 적용 |
 | `rollback-memo-items.sql` | 위 파일 되돌리기(항목 자료 삭제, 승인 필요) — 되돌릴 때만 |
+| `schema-schedule-blocks.sql` | 주간 할 일 줄 종류(kind: 할 일·텍스트·제목·글머리·번호)·하루 안 순서(sort_order). 기존 일정은 할 일로 남음. `schema-schedules-updated-at.sql` 뒤 적용 |
+| `rollback-schedule-blocks.sql` | 위 파일 되돌리기(블록 줄 휴지통으로, 칼럼 삭제, 승인 필요) — 되돌릴 때만 |
 
 이전 단독 업데이트 파일은 기존 설치 이력을 확인할 수 있도록 보존합니다. `schema-update-all.sql`은 위의 기본 부가기능 묶음이며 새 사무실 SQL까지 포함하는 파일은 아닙니다.
 
