@@ -67,6 +67,9 @@ SQL Editor에서 각 단계의 성공을 확인한 후 다음 단계를 실행�
 | `rollback-team-memberships.sql` | 위 파일 되돌리기(승인 필요) |
 | `schema-personal-library.sql` | 개인 메모·PC 폴더·파일 목록·파일 메모(사람 소유, 팀 무관) |
 | `rollback-personal-library.sql` | 위 파일 되돌리기(자료 삭제, 승인 필요) |
+| `schema-schedules-updated-at.sql` | 과업 일정 동시 수정 충돌 검사(updated_at·자동 갱신). `schema-teams.sql` 뒤 적용 |
+| `schema-memo-items.sql` | 월 주요사항 한 줄 = 한 항목, 기존 월 메모 옮김(원본 유지). `schema-schedules-updated-at.sql` 다음 적용 |
+| `rollback-memo-items.sql` | 위 파일 되돌리기(항목 자료 삭제, 승인 필요) — 되돌릴 때만 |
 
 이전 단독 업데이트 파일은 기존 설치 이력을 확인할 수 있도록 보존합니다. `schema-update-all.sql`은 위의 기본 부가기능 묶음이며 새 사무실 SQL까지 포함하는 파일은 아닙니다.
 
