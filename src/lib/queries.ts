@@ -297,6 +297,14 @@ export async function deleteSchedule(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+/** Undo a soft delete; returns the live row. */
+export async function restoreSchedule(id: string): Promise<Schedule> {
+  const supabase = createClient();
+  return unwrap(
+    await supabase.from("schedules").update({ deleted_at: null }).eq("id", id).select().single(),
+  );
+}
+
 // ------------------------------------------------------------- month memo
 
 /** Month memo text plus the updated_at we read; updatedAt null = no row yet. */

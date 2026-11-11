@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { MonthMemo } from "@/components/month-memo";
+import { ScheduleWeek, useScheduleView } from "@/components/schedule-week";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -28,6 +29,7 @@ import {
 } from "@/lib/schedule-view";
 import { STICKY_COLORS, type Schedule, type StickyColor } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { groupWeek, shiftWeek, weekDays, weekLabel, weekStart } from "@/lib/week-view";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const DAY_CELL_LIMIT = 3;
@@ -103,6 +105,8 @@ export function ScheduleCalendar({
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [showAllTodo, setShowAllTodo] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  const [view, setView] = useScheduleView();
+  const [weekStartKey, setWeekStartKey] = useState(() => weekStart(toKey(new Date())));
 
   // Request number: a late response from an older load is dropped.
   const version = useRef(0);
@@ -184,7 +188,8 @@ export function ScheduleCalendar({
   );
 
   // After a conflict: reload, then point the open dialog at the latest row (my input stays).
-  async function recoverFromConflict(id: string) {
+  // Resolves false when a teammate deleted the row.
+  async function recoverFromConflict(id: string): Promise<boolean> {
     try {
       const mine = ++version.current;
       const rows = await api.listSchedules(projectId);
@@ -196,16 +201,95 @@ export function ScheduleCalendar({
       if (!latest) {
         setEdit(null);
         toast.error("삭제된 일정입니다");
-        return;
+        return false;
       }
       setEdit((prev) =>
         prev?.mode === "edit" && prev.target.id === id ? { ...prev, target: latest } : prev,
       );
       toast.error(CONFLICT_MESSAGE);
+      return true;
     } catch {
       toast.error(CONFLICT_MESSAGE);
+      return true;
     }
   }
+
+  // Week board quick add: title and date only; detail fields stay empty.
+  async function addQuick(day: string, title: string): Promise<boolean> {
+    mutating.current++;
+    try {
+      const created = await api.createSchedule(projectId, {
+        title,
+        due_date: day,
+        assignee: null,
+        note: null,
+        color: "yellow",
+      });
+      setSchedules((prev) => [...prev.filter((s) => s.id !== created.id), created]);
+      return true;
+    } catch (error) {
+      toast.error(errorMessage(error, "추가하지 못했습니다."));
+      return false;
+    } finally {
+      mutating.current--;
+    }
+  }
+
+  // Week board inline rename with the D6 edit lock. Resolves true when the edit can close.
+  async function rename(item: Schedule, title: string): Promise<boolean> {
+    mutating.current++;
+    try {
+      const updated = await api.updateSchedule(item.id, { title }, item.updated_at);
+      setSchedules((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      return true;
+    } catch (error) {
+      if (error instanceof api.ScheduleConflictError) {
+        return !(await recoverFromConflict(item.id));
+      }
+      toast.error(errorMessage(error, "저장하지 못했습니다."));
+      return false;
+    } finally {
+      mutating.current--;
+    }
+  }
+
+  // Week board delete: soft delete with an undo toast.
+  async function removeWithUndo(item: Schedule) {
+    mutating.current++;
+    try {
+      await api.deleteSchedule(item.id);
+      setSchedules((prev) => prev.filter((s) => s.id !== item.id));
+      toast.success("일정을 삭제했습니다.", {
+        duration: 10000,
+        action: {
+          label: "되돌리기",
+          onClick: async () => {
+            try {
+              await api.restoreSchedule(item.id);
+              await reload();
+              toast.success("일정을 복원했습니다.");
+            } catch (error) {
+              toast.error(errorMessage(error, "복원하지 못했습니다."));
+            }
+          },
+        },
+      });
+    } catch (error) {
+      toast.error(errorMessage(error, "삭제하지 못했습니다."));
+    } finally {
+      mutating.current--;
+    }
+  }
+
+  const openEdit = (item: Schedule) =>
+    setEdit({
+      mode: "edit",
+      target: item,
+      title: item.title,
+      assignee: item.assignee ?? "",
+      note: item.note ?? "",
+      color: item.color,
+    });
 
   async function submitEdit(event: React.FormEvent) {
     event.preventDefault();
@@ -296,6 +380,26 @@ export function ScheduleCalendar({
     );
   };
 
+  const isWeek = view === "week";
+  // ‹ › and the "today" button move by week on the week board.
+  const shiftPeriod = (delta: number) => {
+    if (!isWeek) return shiftMonth(delta);
+    resetFolds();
+    setWeekStartKey((prev) => shiftWeek(prev, delta));
+  };
+  const goToday = () => {
+    resetFolds();
+    if (isWeek) setWeekStartKey(weekStart(toKey(new Date())));
+    else setMonth(new Date());
+  };
+  const days = useMemo(() => weekDays(weekStartKey), [weekStartKey]);
+  const weekByDate = useMemo(
+    () => groupWeek(schedules, weekStartKey),
+    [schedules, weekStartKey],
+  );
+  // In week mode the month notes follow the month of the week's Monday.
+  const memoMonth = isWeek ? weekStartKey.slice(0, 7) : monthKey;
+
   const openCreate = (dueDate: string) =>
     setEdit({
       mode: "create",
@@ -367,7 +471,7 @@ export function ScheduleCalendar({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold">00_업무일정</h2>
         <span className="text-xs text-muted-foreground">
           남은 일 {todoCount}건
@@ -381,37 +485,67 @@ export function ScheduleCalendar({
           팀 달력에서 보기
         </Link>
         <div className="flex-1" />
+        <div className="flex rounded-lg bg-slate-100 p-0.5" role="group" aria-label="달력 보기">
+          {([["month", "월"], ["week", "주"]] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={view === key}
+              onClick={() => {
+                resetFolds();
+                setView(key);
+              }}
+              className={cn(
+                "rounded-md px-2.5 py-1 text-xs text-slate-500",
+                view === key && "bg-white text-teal-800 shadow-sm",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <Button
           variant="outline"
           size="icon"
           className="size-8"
-          onClick={() => shiftMonth(-1)}
+          aria-label={isWeek ? "이전 주" : "이전 달"}
+          onClick={() => shiftPeriod(-1)}
         >
           <ChevronLeft className="size-4" />
         </Button>
-        <span className="w-28 text-center text-sm font-medium">
-          {month.getFullYear()}년 {month.getMonth() + 1}월
+        <span className="min-w-28 text-center text-sm font-medium">
+          {isWeek
+            ? weekLabel(weekStartKey)
+            : `${month.getFullYear()}년 ${month.getMonth() + 1}월`}
         </span>
         <Button
           variant="outline"
           size="icon"
           className="size-8"
-          onClick={() => shiftMonth(1)}
+          aria-label={isWeek ? "다음 주" : "다음 달"}
+          onClick={() => shiftPeriod(1)}
         >
           <ChevronRight className="size-4" />
         </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            resetFolds();
-            setMonth(new Date());
-          }}
-        >
-          오늘
+        <Button variant="outline" size="sm" onClick={goToday}>
+          {isWeek ? "이번 주" : "오늘"}
         </Button>
       </div>
 
+      {isWeek ? (
+        <ScheduleWeek
+          days={days}
+          byDate={weekByDate}
+          todayKey={todayKey}
+          showDone={showDone}
+          onToggleShowDone={() => setShowDone((prev) => !prev)}
+          onAdd={addQuick}
+          onToggle={toggleDone}
+          onRename={rename}
+          onOpenDetail={openEdit}
+          onRemove={(item) => void removeWithUndo(item)}
+        />
+      ) : (
       <div className="grid grid-cols-7 gap-px rounded-lg border bg-border text-center text-xs font-medium">
         {WEEKDAYS.map((w, i) => (
           <div
@@ -526,13 +660,15 @@ export function ScheduleCalendar({
           );
         })}
       </div>
+      )}
       <p className="-mt-2 text-right text-[11px] text-slate-400">
         함께 쓰는 일정 · 30초마다 자동 갱신
       </p>
 
-      <MonthMemo projectId={projectId} month={monthKey} />
+      <MonthMemo projectId={projectId} month={memoMonth} />
 
-      {/* 이번 달 포스트잇 모아보기 */}
+      {/* 이번 달 포스트잇 모아보기 (week mode shows the same rows on the board) */}
+      {isWeek ? null : (
       <section
         className="rounded-lg border bg-background p-3"
         data-testid="month-todo"
@@ -585,6 +721,7 @@ export function ScheduleCalendar({
           </div>
         )}
       </section>
+      )}
 
       {loading ? (
         <p className="text-xs text-muted-foreground">불러오는 중...</p>

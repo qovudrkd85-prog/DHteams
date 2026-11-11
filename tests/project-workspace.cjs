@@ -41,6 +41,7 @@ const deferred = () => {
     // Schedules carry updated_at (the D6 lock token) except t3, which stands for a DB without the column.
     schedules.forEach((row) => { if (row.id !== "t3") row.updated_at = stamp(); });
     const schedulePatches = [];
+    const schedulePosts = [];
     const memos = new Map([
       [month, { content: "이번 달 원래 메모", updated_at: stamp() }],
       [nextMonth, { content: "다음 달 원래 메모", updated_at: stamp() }],
@@ -83,6 +84,15 @@ const deferred = () => {
         return route.fulfill({ json: logs.filter((row) => Boolean(row.deleted_at) === deleted) });
       }
       if (table === "schedules") {
+        if (method === "POST") {
+          // D8 quick add from the week board.
+          schedulePosts.push(body);
+          const input = Array.isArray(body) ? body[0] : body;
+          const at = stamp();
+          const row = { ...input, id: `new${schedulePosts.length}`, project_id: "p1", done: false, created_at: at, updated_at: at, deleted_at: null };
+          schedules.push(row);
+          return route.fulfill({ status: 201, json: { ...row } });
+        }
         if (method === "PATCH") {
           const row = schedules.find((s) => `eq.${s.id}` === url.searchParams.get("id"));
           const expected = url.searchParams.get("updated_at");
@@ -498,8 +508,141 @@ const deferred = () => {
     await fireFocus();
     await itemRow("동료가 방금 올린 주요사항").waitFor();
     assert.ok((await itemRows.first().innerText()).includes("동료가 방금 올린 주요사항"));
+
+    // D8: [월|주] toggle in the header row and the week board (to-dos only, no DB change).
+    const addDaysKey = (key, n) => new Date(Date.parse(`${key}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+    const monday = addDaysKey(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7));
+    const wed = addDaysKey(monday, 2);
+    const thu = addDaysKey(monday, 3);
+    const nextWed = addDaysKey(monday, 9);
+    const weekRow = (id, title, due_date, extra = {}) => ({ id, project_id: "p1", title, due_date, assignee: null, note: null, color: "green", done: false, created_at: stamp(), updated_at: stamp(), deleted_at: null, ...extra });
+    const w1 = weekRow("w1", "주간 할 일 A", wed, { assignee: "이지은" });
+    const w2 = weekRow("w2", "주간 할 일 B", wed);
+    const w3 = weekRow("w3", "주간 완료 일", wed, { done: true });
+    schedules.push(w1, w2, w3, weekRow("w4", "다음 주 할 일", nextWed));
+    await page.goto(`${baseURL}/projects/p1`);
+    await openSchedule();
+    const viewToggle = page.getByRole("group", { name: "달력 보기", exact: true });
+    const board = page.getByTestId("week-board");
+    const dayCells = board.locator("[data-week-day]");
+    await page.locator(`[data-day="${today}"]`).waitFor();
+    assert.equal(await board.count(), 0, "Month view is the default.");
+    await viewToggle.getByRole("button", { name: "주", exact: true }).click();
+    await dayCells.first().waitFor();
+    assert.equal(await dayCells.count(), 7);
+    assert.equal(await dayCells.first().getAttribute("data-week-day"), monday, "The week starts on Monday.");
+    assert.equal(await board.locator('[data-today="true"]').getAttribute("data-week-day"), today);
+    assert.equal(await page.locator(`[data-day="${today}"]`).count(), 0, "The month grid is replaced by the board.");
+    assert.equal(await page.getByTestId("month-todo").count(), 0, "Month todo list is hidden in week mode.");
+    // The choice survives a reload (localStorage).
+    await page.goto(`${baseURL}/projects/p1`);
+    await openSchedule();
+    await dayCells.first().waitFor();
+    assert.equal(await dayCells.count(), 7);
+
+    // Wednesday: open rows with the assignee name; the done one behind the week fold.
+    const wedCell = board.locator(`[data-week-day="${wed}"]`);
+    const rowOf = (cell, title) => cell.locator("[data-week-row]").filter({ hasText: title });
+    await rowOf(wedCell, "주간 할 일 A").waitFor();
+    await rowOf(wedCell, "주간 할 일 B").waitFor();
+    assert.ok((await rowOf(wedCell, "주간 할 일 A").innerText()).includes("이지은"), "The assignee name is shown.");
+    assert.equal(await rowOf(wedCell, "주간 완료 일").count(), 0, "Done rows start folded.");
+    await board.getByRole("button", { name: /^완료 \d+건 보기$/ }).click();
+    await rowOf(wedCell, "주간 완료 일").waitFor();
+    await board.getByRole("button", { name: /^완료 \d+건 숨기기$/ }).click();
+    await rowOf(wedCell, "주간 완료 일").waitFor({ state: "hidden" });
+
+    // Quick add on Thursday: Enter posts once, no dialog, input cleared and still focused.
+    const thuCell = board.locator(`[data-week-day="${thu}"]`);
+    const thuAdd = board.getByRole("textbox", { name: `${thu} 할 일 추가`, exact: true });
+    await thuAdd.fill("측량 준비");
+    await thuAdd.press("Enter");
+    await rowOf(thuCell, "측량 준비").waitFor();
+    assert.equal(schedulePosts.length, 1);
+    const quick = Array.isArray(schedulePosts[0]) ? schedulePosts[0][0] : schedulePosts[0];
+    assert.equal(quick.due_date, thu);
+    assert.equal(quick.title, "측량 준비");
+    assert.ok(!("kind" in quick) && !("sort_order" in quick), `D8 posts no block columns: ${Object.keys(quick).join(",")}`);
+    assert.equal(await page.getByRole("dialog").count(), 0, "Quick add opens no dialog.");
+    assert.equal(await thuAdd.inputValue(), "");
+    assert.equal(await thuAdd.evaluate((el) => el === document.activeElement), true, "Focus stays in the add input.");
+    await thuAdd.press("Enter");
+    await page.waitForTimeout(300);
+    assert.equal(schedulePosts.length, 1, "Enter on an empty add input posts nothing.");
+
+    // Checkbox: unconditional PATCH {done:true}.
+    const doneResponse = page.waitForResponse((response) => response.url().includes("/schedules") && response.request().method() === "PATCH");
+    await rowOf(wedCell, "주간 할 일 B").getByRole("checkbox").click();
+    await doneResponse;
+    assert.deepEqual(schedulePatches.at(-1).body, { done: true });
+    assert.equal(w2.done, true);
+    await board.getByRole("button", { name: /^완료 \d+건 보기$/ }).click();
+
+    // Inline rename: click the text, Enter saves with the D6 updated_at condition.
+    const rowEdit = board.getByRole("textbox", { name: "할 일 고치기", exact: true });
+    await rowOf(wedCell, "주간 할 일 A").getByRole("button", { name: "주간 할 일 A", exact: true }).click();
+    await rowEdit.fill("주간 할 일 A 수정");
+    await rowEdit.press("Enter");
+    await rowOf(wedCell, "주간 할 일 A 수정").getByRole("button", { name: "주간 할 일 A 수정", exact: true }).waitFor();
+    assert.equal(schedulePatches.at(-1).body.title, "주간 할 일 A 수정");
+    assert.ok(String(schedulePatches.at(-1).expected).startsWith("eq."), "A rename sends the updated_at it read.");
+    assert.equal(w1.title, "주간 할 일 A 수정");
+    // Conflict: a teammate saved first. Toast, my text stays, the teammate's row is kept.
+    await rowOf(wedCell, "주간 할 일 A 수정").getByRole("button", { name: "주간 할 일 A 수정", exact: true }).click();
+    await rowEdit.fill("내 주간 수정");
+    w1.title = "동료 주간 수정";
+    w1.updated_at = stamp();
+    await rowEdit.press("Enter");
+    await conflictToast.first().waitFor();
+    assert.equal(await rowEdit.inputValue(), "내 주간 수정", "My input stays after a conflict.");
+    assert.equal(w1.title, "동료 주간 수정", "A stale rename must not overwrite the teammate.");
+    await rowEdit.press("Escape");
+    await rowOf(wedCell, "동료 주간 수정").waitFor();
+
+    // Emptied row + Backspace deletes (soft) with an undo toast.
+    await rowOf(wedCell, "주간 완료 일").getByRole("button", { name: "주간 완료 일", exact: true }).click();
+    await rowEdit.fill("");
+    await rowEdit.press("Backspace");
+    await rowOf(wedCell, "주간 완료 일").waitFor({ state: "hidden" });
+    assert.ok(w3.deleted_at, "Delete is a soft delete.");
+    await page.getByRole("button", { name: "되돌리기", exact: true }).last().click();
+    await rowOf(wedCell, "주간 완료 일").waitFor();
+    assert.equal(w3.deleted_at, null);
+
+    // Week navigation.
+    await page.getByRole("button", { name: "다음 주", exact: true }).click();
+    await rowOf(board.locator(`[data-week-day="${nextWed}"]`), "다음 주 할 일").waitFor();
+    assert.equal(await dayCells.first().getAttribute("data-week-day"), addDaysKey(monday, 7));
+    await page.getByRole("button", { name: "이번 주", exact: true }).click();
+    await board.locator(`[data-week-day="${monday}"]`).waitFor();
+
+    // Focus refresh: a teammate's row arrives while I type; my add text stays.
+    await thuAdd.fill("치는 중");
+    schedules.push(weekRow("w5", "동료 주간 줄", thu));
+    await fireFocus();
+    await rowOf(thuCell, "동료 주간 줄").waitFor();
+    assert.equal(await thuAdd.inputValue(), "치는 중");
+    await thuAdd.fill("");
+
+    // Phone width: days stack vertically, no sideways scroll inside the board.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(300);
+    const xs = await dayCells.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().x)));
+    assert.equal(new Set(xs).size, 1, `Stacked days share one x: ${xs.join(",")}`);
+    assert.ok(await board.evaluate((el) => el.scrollWidth <= el.clientWidth), "No sideways scroll in the board.");
+    await page.setViewportSize({ width: 1440, height: 1080 });
+
+    // Back to the month grid: the quick-added row is on its date.
+    await viewToggle.getByRole("button", { name: "월", exact: true }).click();
+    const thuMonthCell = page.locator(`[data-day="${thu}"]`);
+    if (await thuMonthCell.count()) {
+      const more = thuMonthCell.getByRole("button", { name: /건 더 보기$/ });
+      if (await more.count()) await more.click();
+      await thuMonthCell.getByRole("button", { name: "측량 준비", exact: true }).waitFor();
+    }
+    assert.equal(await board.count(), 0);
     assert.deepEqual(errors, []);
-    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height (all on the fallback editor); D7 memo items fold/author/add without author fields/esc/edit conflict/delete undo/peer refresh.");
+    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height (all on the fallback editor); D7 memo items fold/author/add without author fields/esc/edit conflict/delete undo/peer refresh; D8 week toggle/remembered view/done fold/quick add/toggle/rename conflict/delete undo/week nav/peer refresh/phone stack.");
   } finally {
     await browser.close();
   }
