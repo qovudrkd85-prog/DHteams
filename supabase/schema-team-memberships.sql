@@ -58,6 +58,8 @@ grant select on table public.team_memberships to authenticated;
 grant all on table public.team_memberships to service_role;
 
 -- 지금 보는 팀: 소속일 때만 값을 돌려줍니다.
+-- 화면이 x-teams-team 머리글로 "내가 보고 있는 팀"을 보내는데 지금 보는 팀과 다르면(다른 기기에서 전환) null:
+-- 읽기는 빈 결과, 쓰기는 정책 위반으로 막혀 엉뚱한 팀에 쓰지 않습니다. 머리글이 없으면(데스크톱·옛 앱) 그대로.
 create or replace function public.current_team_id()
 returns uuid language sql stable security definer set search_path = '' as $$
   select member.team_id from public.team_members as member
@@ -65,7 +67,11 @@ returns uuid language sql stable security definer set search_path = '' as $$
     and exists (
       select 1 from public.team_memberships as membership
       where membership.member_id = member.id and membership.team_id = member.team_id
-    );
+    )
+    and coalesce(
+      nullif(current_setting('request.headers', true), '')::json ->> 'x-teams-team',
+      member.team_id::text
+    ) = member.team_id::text;
 $$;
 revoke all on function public.current_team_id() from public, anon, authenticated;
 grant execute on function public.current_team_id() to authenticated, service_role;

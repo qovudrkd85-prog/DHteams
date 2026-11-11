@@ -312,10 +312,46 @@ async function attendanceSuite() {
   }
 }
 
+// M5: a screen still showing another team (x-teams-team header) cannot read or write the active team.
+async function expectedTeamSuite() {
+  const { db, one, rows, rejects, session, members } = await openDb();
+  const headers = (value) => db.query("select set_config('request.headers', $1, false)", [value]);
+  try {
+    await db.exec(readSql("schema-team-memberships"));
+    await session(ids.alice);
+    const teamA = await one("select * from create_team('A팀')");
+    const teamB = await one("select * from create_team('B팀')");
+    await one("select * from switch_team($1)", [teamA.id]);
+    await one("insert into projects(name,owner_id) values ('A 과업',$1) returning id", [ids.alice]);
+
+    await headers(JSON.stringify({ "x-teams-team": teamB.id }));
+    assert.equal((await one("select public.current_team_id() as id")).id, null);
+    assert.equal((await rows("select * from projects")).length, 0);
+    await rejects("insert into projects(name,owner_id) values ('엉뚱한 팀',$1)", [ids.alice]);
+    await rejects("insert into department_events(title,visibility,starts_on,ends_on,created_by) values ('x','team','2026-11-11','2026-11-11',$1)", [members.alice.id]);
+    // Private schedules do not depend on the team.
+    await one("insert into department_events(title,visibility,starts_on,ends_on,created_by) values ('개인','private','2026-11-11','2026-11-11',$1) returning id", [members.alice.id]);
+
+    await headers(JSON.stringify({ "x-teams-team": teamA.id }));
+    assert.equal((await one("select public.current_team_id() as id")).id, teamA.id);
+    assert.deepEqual((await rows("select name from projects")).map((r) => r.name), ["A 과업"]);
+    // No header (desktop app, older app) or other headers: unchanged behaviour.
+    await headers(JSON.stringify({ "user-agent": "desktop" }));
+    assert.equal((await one("select public.current_team_id() as id")).id, teamA.id);
+    await headers("");
+    assert.equal((await one("select public.current_team_id() as id")).id, teamA.id);
+    await one("insert into projects(name,owner_id) values ('A 둘째',$1) returning id", [ids.alice]);
+  } finally {
+    await db.close();
+  }
+}
+
 (async () => {
   await migrationSuite();
+  await expectedTeamSuite();
   await rpcSuite();
   await attendanceSuite();
+  console.log("PASS: expected-team header (x-teams-team) mismatch hides the active team and blocks team writes; no header keeps old behaviour.");
   console.log("PASS: membership migration (owners from creators, repeatable), active-team foreign key, no direct membership writes, schema-teams re-run guard, isolation kept, cross-team mates without cross-team positions.");
   console.log("PASS: create/join add memberships, switch_team (members only, presence dropped, desks kept), per-team data, per-team owner role for code rotation, leave moves to latest remaining team, owner promotion, empty team kept, 20-team limit.");
   console.log("PASS: attendance per team (check in again after switching, each team sees its own row, no cross-team check-out).");

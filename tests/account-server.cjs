@@ -430,6 +430,14 @@ function client(baseURL) {
     assert.equal(upstream.state.tokens.get(userToken).user.id, alice.user.id);
     assert.notEqual(proxyCall.headers.authorization, `Bearer ${proxyCall.headers.apikey}`);
     assert.equal(proxyCall.headers.apikey, "sb_publishable_local_integration_only");
+    // The screen's team id is forwarded (database refuses stale screens); other headers and junk values are not.
+    const screenTeam = randomUUID();
+    await browser.request("/api/db/rest/v1/projects?select=*", { headers: { "x-teams-team": screenTeam, "x-other": "drop-me" } });
+    const teamHeaderCall = upstream.state.calls.findLast((call) => call.path === "/rest/v1/projects");
+    assert.equal(teamHeaderCall.headers["x-teams-team"], screenTeam);
+    assert.equal(teamHeaderCall.headers["x-other"], undefined);
+    await browser.request("/api/db/rest/v1/projects?select=*", { headers: { "x-teams-team": "not-a-uuid" } });
+    assert.equal(upstream.state.calls.findLast((call) => call.path === "/rest/v1/projects").headers["x-teams-team"], undefined);
     const presence = await browser.request("/api/db/rest/v1/team_presence?select=*", { headers: { Authorization: "Bearer spoofed-user-token" } });
     assert.equal(presence.status, 200);
     assert.equal(presence.data[0].member_id, alice.member.id);

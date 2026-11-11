@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, Fragment, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import type { Account, ProfileInput, SessionPayload } from "@/lib/account/types";
+import { setScreenTeam } from "@/lib/supabase/client";
 import type { TeamMember } from "@/lib/team/workspace";
 import { LoginForm } from "./login-form";
 import { AccountSettingsDialog } from "./settings-dialog";
@@ -84,10 +85,12 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     void refresh();
     const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
+    const onTeamCheck = () => void refresh();
     const timer = window.setInterval(onVisible, 30000);
     window.addEventListener("focus", onVisible);
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("teams:session-expired", expireSession);
+    window.addEventListener("teams:team-check", onTeamCheck);
     if (typeof BroadcastChannel !== "undefined") {
       channel.current = new BroadcastChannel("teams-session");
       channel.current.onmessage = () => void refresh();
@@ -98,10 +101,15 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("focus", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("teams:session-expired", expireSession);
+      window.removeEventListener("teams:team-check", onTeamCheck);
       channel.current?.close();
       channel.current = null;
     };
   }, [refresh, expireSession, invalidate]);
+
+  // Layout effect: runs before the remounted workspace starts loading data for the new team.
+  const screenTeam = account?.team?.id ?? null;
+  useLayoutEffect(() => { setScreenTeam(screenTeam); }, [screenTeam]);
 
   const mutateAccount = useCallback(async (path: string, method: string, body?: object) => {
     if (mutating.current) throw new Error("이전 요청이 끝난 후 다시 시도해 주세요.");

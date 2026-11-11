@@ -4,6 +4,9 @@ import { AccountError, accountFailure, createAuthContext, jsonError, requireSame
 
 const TABLES = new Set(["projects", "nodes", "file_logs", "schedules", "project_memos", "office_layouts", "department_events", "team_members", "team_attendance", "team_presence", "project_members"]);
 const REQUEST_HEADERS = ["content-type", "accept", "prefer", "range", "range-unit", "if-match", "if-none-match"];
+// The team the screen shows. The database answers nothing for a stale screen (another device switched teams).
+const TEAM_HEADER = "x-teams-team";
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RESPONSE_HEADERS = ["content-type", "content-range", "range-unit", "preference-applied", "etag"];
 
 async function handle(request: NextRequest, path: string[]) {
@@ -31,6 +34,8 @@ async function handle(request: NextRequest, path: string[]) {
       const value = request.headers.get(name);
       if (value) headers.set(name, value);
     });
+    const screenTeam = request.headers.get(TEAM_HEADER);
+    if (screenTeam && uuidPattern.test(screenTeam)) headers.set(TEAM_HEADER, screenTeam.toLowerCase());
     const raw = ["GET", "HEAD"].includes(request.method) ? "" : await request.text();
     const upstream = await fetch(`${auth.config.url}/rest/v1/${path[2]}${request.nextUrl.search}`, {
       method: request.method, headers, body: raw || undefined, cache: "no-store", redirect: "error",
