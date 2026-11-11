@@ -11,7 +11,7 @@ import { DepartmentCalendar } from "@/components/department-calendar";
 import { HubTabs, useHubView } from "@/components/team/hub-tabs";
 import type { HubView } from "@/lib/team/rooms";
 import { TeamPanel } from "@/components/team/panel";
-import { Garage, HealingCard } from "@/components/team/garage";
+import { Garage } from "@/components/team/garage";
 import { HealingPlace } from "@/components/team/healing/healing-place";
 import { TeamRoomMini } from "@/components/team/team-room";
 import { ProjectFocusListener, UpcomingBadge, useFocusTarget, useUpcomingDeadlines } from "@/components/team/project-deadline-filter";
@@ -63,15 +63,6 @@ export default function HomePage() {
   // Same colours as the team calendar (both built from this team's project list).
   const toneMap = useMemo(() => projectToneMap(projects.map((p) => p.id)), [projects]);
   const focus = useFocusTarget(focusProject, projects, loading);
-  const [healing, setHealing] = useState(false);
-  // Set when healing just ended, so the card takes focus back.
-  const [healingEnded, setHealingEnded] = useState(false);
-  const [seenView, setSeenView] = useState(view);
-  if (seenView !== view) {
-    // Any route out of the garage (tab click, storage sync) ends the healing scene.
-    setSeenView(view);
-    if (view !== "garage") { setHealing(false); setHealingEnded(false); }
-  }
   const visibleProjects = projects.filter((project) =>
     `${project.name} ${project.code ?? ""}`
       .toLocaleLowerCase()
@@ -244,15 +235,14 @@ export default function HomePage() {
             )}
           </div>
           <aside
-            className="min-w-0 space-y-4 lg:sticky lg:top-20"
+            className="min-w-0 space-y-4 lg:sticky lg:top-20 has-[[data-healing-wide]]:z-[80]"
             aria-label="과업 목록과 팀 방"
           >
             {view === "garage" && (
               <>
                 <TeamPanel workspace={workspace} compact />
-                {healing
-                  ? <HealingPlace compact member={workspace.error ? null : workspace.currentMember} onBack={() => { setHealing(false); setHealingEnded(true); }} />
-                  : <HealingCard focusOnMount={healingEnded} onOpen={() => { setHealing(true); setHealingEnded(false); }} />}
+                {/* The healing walk is always open in the garage; it takes the old healing card's place. */}
+                <HealingPlace compact member={workspace.error ? null : workspace.currentMember} />
               </>
             )}
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" data-testid="project-list">
