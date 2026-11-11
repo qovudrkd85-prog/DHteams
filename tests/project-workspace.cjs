@@ -38,6 +38,9 @@ const deferred = () => {
     // Monotonic fake clock for project_memos.updated_at (the optimistic-lock token).
     let clock = Date.parse("2026-01-01T00:00:00Z");
     const stamp = () => new Date((clock += 1000)).toISOString();
+    // Schedules carry updated_at (the D6 lock token) except t3, which stands for a DB without the column.
+    schedules.forEach((row) => { if (row.id !== "t3") row.updated_at = stamp(); });
+    const schedulePatches = [];
     const memos = new Map([
       [month, { content: "이번 달 원래 메모", updated_at: stamp() }],
       [nextMonth, { content: "다음 달 원래 메모", updated_at: stamp() }],
@@ -78,9 +81,17 @@ const deferred = () => {
       if (table === "schedules") {
         if (method === "PATCH") {
           const row = schedules.find((s) => `eq.${s.id}` === url.searchParams.get("id"));
+          const expected = url.searchParams.get("updated_at");
+          schedulePatches.push({ id: row && row.id, expected, liveOnly: url.searchParams.get("deleted_at") === "is.null", body });
           if (!row) return route.fulfill({ status: 404, json: { message: "no schedule row" } });
+          // Conditional update: a stale token or a deleted row matches nothing (PostgREST returns no row).
+          if (expected !== null && (expected !== `eq.${row.updated_at}` || (url.searchParams.get("deleted_at") === "is.null" && row.deleted_at))) {
+            return route.fulfill({ json: null });
+          }
           Object.assign(row, body);
-          return route.fulfill({ json: row });
+          // The trigger bumps updated_at only where the column exists.
+          if ("updated_at" in row) row.updated_at = stamp();
+          return route.fulfill({ json: { ...row } });
         }
         scheduleGets++;
         return route.fulfill({ json: schedules.filter((row) => Boolean(row.deleted_at) === deleted) });
@@ -205,6 +216,66 @@ const deferred = () => {
     await peerCell.getByRole("button", { name: "동료가 추가한 일정", exact: true }).waitFor({ state: "hidden" });
     assert.equal(await todayCell.getByRole("checkbox").count(), 3);
 
+    // D6: toggle done, then edit right away. The toggle is unconditional and its
+    // returned row refreshes updated_at, so the edit right after is not a conflict.
+    const saveButton = editDialog.getByRole("button", { name: "저장", exact: true });
+    const t1 = schedules.find((s) => s.id === "t1");
+    const t2 = schedules.find((s) => s.id === "t2");
+    const t3 = schedules.find((s) => s.id === "t3");
+    const toggleResponse = page.waitForResponse((response) => response.url().includes("/schedules") && response.request().method() === "PATCH");
+    await todayCell.getByRole("checkbox").nth(1).click();
+    await toggleResponse;
+    assert.equal(t2.done, true);
+    assert.equal(schedulePatches.at(-1).expected, null, "Toggling done saves without a condition.");
+    await todayCell.getByRole("button", { name: "오늘 일정 2", exact: true }).click();
+    await editTitle.fill("완료 후 바로 고친 제목");
+    await saveButton.click();
+    await editDialog.waitFor({ state: "hidden" });
+    assert.ok(String(schedulePatches.at(-1).expected).startsWith("eq."), "An edit sends the updated_at it read.");
+    assert.ok(schedulePatches.at(-1).liveOnly, "A conditional edit only matches a live row.");
+    assert.equal(t2.title, "완료 후 바로 고친 제목", "Edit right after a toggle must not be a conflict.");
+
+    // Conflict: a teammate saved after we opened the dialog. Ours is kept, the chip shows theirs.
+    const conflictToast = page.getByText("다른 팀원이 이 일정을 먼저 수정했습니다. 최신 내용을 확인한 뒤 다시 저장해 주세요.", { exact: true });
+    await todayCell.getByRole("button", { name: "오늘 일정 1", exact: true }).click();
+    await editTitle.fill("내가 고친 일정 제목");
+    const openedToken = t1.updated_at;
+    t1.title = "동료가 먼저 고친 제목";
+    t1.updated_at = stamp();
+    await saveButton.click();
+    await conflictToast.waitFor();
+    await todayCell.getByText("동료가 먼저 고친 제목", { exact: true }).waitFor();
+    assert.equal(schedulePatches.at(-1).expected, `eq.${openedToken}`);
+    assert.equal(t1.title, "동료가 먼저 고친 제목", "A stale edit must not overwrite the teammate.");
+    assert.equal(await editDialog.isVisible(), true, "The dialog stays open after a conflict.");
+    assert.equal(await editTitle.inputValue(), "내가 고친 일정 제목", "My input stays after a conflict.");
+    await saveButton.click();
+    await editDialog.waitFor({ state: "hidden" });
+    assert.equal(t1.title, "내가 고친 일정 제목", "Saving again after the conflict succeeds.");
+
+    // A row without updated_at (column not yet in the DB) saves with no condition.
+    await todayCell.getByRole("button", { name: "오늘 일정 3", exact: true }).click();
+    await editTitle.fill("칼럼 없는 일정 수정");
+    await saveButton.click();
+    await editDialog.waitFor({ state: "hidden" });
+    assert.equal(schedulePatches.at(-1).id, "t3");
+    assert.equal(schedulePatches.at(-1).expected, null, "No updated_at means no condition in the PATCH URL.");
+    assert.equal(t3.title, "칼럼 없는 일정 수정");
+
+    // A teammate deleted the row while we edited: the dialog closes with a notice.
+    await todayCell.getByRole("button", { name: "완료 후 바로 고친 제목", exact: true }).click();
+    await editTitle.fill("삭제된 일정에 쓴 제목");
+    t2.deleted_at = new Date().toISOString();
+    t2.updated_at = stamp();
+    await saveButton.click();
+    await page.getByText("삭제된 일정입니다", { exact: true }).waitFor();
+    await editDialog.waitFor({ state: "hidden" });
+    assert.equal(t2.title, "완료 후 바로 고친 제목");
+    // Put it back so the trash test below sees only its own row.
+    t2.deleted_at = null;
+    await fireFocus();
+    await todayCell.getByRole("button", { name: "완료 후 바로 고친 제목", exact: true }).waitFor();
+
     // Leaving before the debounce expires saves the original month. The next
     // month stays empty and disabled until its own data arrives.
     const firstSave = deferred();
@@ -311,7 +382,7 @@ const deferred = () => {
     await actor.waitFor();
     assert.equal(await actor.inputValue(), "", "A reloaded log keeps the cleared actor.");
     assert.deepEqual(errors, []);
-    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, memo idle refresh, memo conflict keep-mine/use-peer, capped memo height.");
+    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer, capped memo height.");
   } finally {
     await browser.close();
   }

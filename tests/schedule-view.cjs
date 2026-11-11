@@ -74,6 +74,9 @@ assert.equal(sv.sameSchedules([row("a"), row("b")], [row("b"), row("a")]), false
 for (const [key, value] of [["title", "u"], ["due_date", "2026-11-12"], ["assignee", "김"], ["note", "n"], ["color", "pink"], ["done", true]]) {
   assert.equal(sv.sameSchedules([row("a")], [row("a", { [key]: value })]), false, `${key} change must count.`);
 }
+// updated_at is the edit lock token: a newer token must replace the stale row.
+assert.equal(sv.sameSchedules([row("a", { updated_at: "1" })], [row("a", { updated_at: "2" })]), false, "updated_at change must count.");
+assert.equal(sv.sameSchedules([row("a")], [row("a")]), true, "Rows without updated_at still compare equal.");
 
 // shouldRefreshMemo: visible page, nothing waiting to save, calm status, textarea not focused.
 const calm = { visible: true, pending: false, status: "idle", focused: false };
@@ -93,4 +96,4 @@ assert.equal(sv.memoLineCount("가\n나"), 2);
 assert.equal(sv.memoLineCount("가\r\n나\n"), 3);
 assert.equal(sv.memoLineCount(Array(100).fill("x").join("\n")), 100);
 
-console.log("PASS: capCell cap/hidden count, splitMonthItems open-by-date and done, isOverdue only for past not-done items, shouldRefreshSchedules gate, sameSchedules field/order compare, shouldRefreshMemo gate, memoLineCount.");
+console.log("PASS: capCell cap/hidden count, splitMonthItems open-by-date and done, isOverdue only for past not-done items, shouldRefreshSchedules gate, sameSchedules field/order/updated_at compare, shouldRefreshMemo gate, memoLineCount.");

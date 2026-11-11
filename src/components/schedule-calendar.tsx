@@ -33,6 +33,8 @@ const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const DAY_CELL_LIMIT = 3;
 const MONTH_TODO_LIMIT = 12;
 const REFRESH_MS = 30000;
+const CONFLICT_MESSAGE =
+  "다른 팀원이 이 일정을 먼저 수정했습니다. 최신 내용을 확인한 뒤 다시 저장해 주세요.";
 
 const COLOR_CLASS: Record<StickyColor, string> = {
   yellow: "bg-yellow-100 border-yellow-300 text-yellow-950",
@@ -181,6 +183,30 @@ export function ScheduleCalendar({
     [schedules, monthKey],
   );
 
+  // After a conflict: reload, then point the open dialog at the latest row (my input stays).
+  async function recoverFromConflict(id: string) {
+    try {
+      const mine = ++version.current;
+      const rows = await api.listSchedules(projectId);
+      if (mine === version.current) {
+        setSchedules((prev) => (sameSchedules(prev, rows) ? prev : rows));
+        setLoading(false);
+      }
+      const latest = rows.find((s) => s.id === id);
+      if (!latest) {
+        setEdit(null);
+        toast.error("삭제된 일정입니다");
+        return;
+      }
+      setEdit((prev) =>
+        prev?.mode === "edit" && prev.target.id === id ? { ...prev, target: latest } : prev,
+      );
+      toast.error(CONFLICT_MESSAGE);
+    } catch {
+      toast.error(CONFLICT_MESSAGE);
+    }
+  }
+
   async function submitEdit(event: React.FormEvent) {
     event.preventDefault();
     if (!edit || !edit.title.trim()) return;
@@ -197,19 +223,27 @@ export function ScheduleCalendar({
         });
         setSchedules((prev) => [...prev, created]);
       } else {
-        const updated = await api.updateSchedule(edit.target.id, {
-          title: edit.title.trim(),
-          assignee: edit.assignee.trim() || null,
-          note: edit.note.trim() || null,
-          color: edit.color,
-        });
+        const updated = await api.updateSchedule(
+          edit.target.id,
+          {
+            title: edit.title.trim(),
+            assignee: edit.assignee.trim() || null,
+            note: edit.note.trim() || null,
+            color: edit.color,
+          },
+          edit.target.updated_at,
+        );
         setSchedules((prev) =>
           prev.map((s) => (s.id === updated.id ? updated : s)),
         );
       }
       setEdit(null);
     } catch (error) {
-      toast.error(errorMessage(error, "저장하지 못했습니다."));
+      if (edit.mode === "edit" && error instanceof api.ScheduleConflictError) {
+        await recoverFromConflict(edit.target.id);
+      } else {
+        toast.error(errorMessage(error, "저장하지 못했습니다."));
+      }
     } finally {
       mutating.current--;
     }
@@ -222,7 +256,9 @@ export function ScheduleCalendar({
       prev.map((s) => (s.id === schedule.id ? { ...s, done: next } : s)),
     );
     try {
-      await api.updateSchedule(schedule.id, { done: next });
+      // Unconditional, but keep the returned row so its updated_at stays fresh.
+      const saved = await api.updateSchedule(schedule.id, { done: next });
+      setSchedules((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
     } catch (error) {
       setSchedules((prev) =>
         prev.map((s) => (s.id === schedule.id ? { ...s, done: !next } : s)),

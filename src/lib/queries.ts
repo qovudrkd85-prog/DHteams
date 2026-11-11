@@ -252,12 +252,40 @@ export async function createSchedule(
   );
 }
 
+/** A teammate changed or deleted the schedule after we read it. */
+export class ScheduleConflictError extends Error {
+  constructor() {
+    super("다른 팀원이 이 일정을 먼저 수정했습니다");
+    this.name = "ScheduleConflictError";
+  }
+}
+
+/**
+ * With `expectedUpdatedAt` the update only applies to the live row we read;
+ * no match throws ScheduleConflictError. Without it (column not in the DB yet)
+ * it saves unconditionally as before.
+ */
 export async function updateSchedule(
   id: string,
   patch: Partial<ScheduleInput>,
+  expectedUpdatedAt?: string,
 ): Promise<Schedule> {
   const supabase = createClient();
-  return unwrap(await supabase.from("schedules").update(patch).eq("id", id).select().single());
+  if (!expectedUpdatedAt) {
+    return unwrap(await supabase.from("schedules").update(patch).eq("id", id).select().single());
+  }
+  const row = unwrap<Schedule | null>(
+    await supabase
+      .from("schedules")
+      .update(patch)
+      .eq("id", id)
+      .eq("updated_at", expectedUpdatedAt)
+      .is("deleted_at", null)
+      .select()
+      .maybeSingle(),
+  );
+  if (!row) throw new ScheduleConflictError();
+  return row;
 }
 
 export async function deleteSchedule(id: string): Promise<void> {

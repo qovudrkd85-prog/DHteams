@@ -67,12 +67,15 @@ export function memoLineCount(text: string): number {
 }
 
 const SAME_KEYS =["id", "title", "due_date", "assignee", "note", "color", "done"] as const;
-type ComparableSchedule = { [K in (typeof SAME_KEYS)[number]]: unknown };
+type ComparableSchedule = { [K in (typeof SAME_KEYS)[number]]: unknown } & { updated_at?: unknown };
 
-/** True when both lists hold the same rows in the same order (shown fields only). */
+/** True when both lists hold the same rows in the same order (shown fields plus the updated_at edit token). */
 export function sameSchedules(a: readonly ComparableSchedule[], b: readonly ComparableSchedule[]): boolean {
   return (
     a.length === b.length &&
-    a.every((row, i) => SAME_KEYS.every((key) => row[key] === b[i][key]))
+    a.every(
+      (row, i) =>
+        SAME_KEYS.every((key) => row[key] === b[i][key]) && row.updated_at === b[i].updated_at,
+    )
   );
 }

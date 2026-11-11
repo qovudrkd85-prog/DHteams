@@ -95,4 +95,6 @@ export interface Schedule {
   done: boolean;
   created_at: string;
   deleted_at?: string | null;
+  /** Edit lock token; missing until schema-schedules-updated-at.sql is applied. */
+  updated_at?: string;
 }
