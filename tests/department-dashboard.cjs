@@ -187,6 +187,11 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     }
     await calendar.waitFor();
     assert.equal(await page.getByRole("dialog", { name: "우리 팀 공유 달력", exact: true }).count(), 0, "The team calendar is inline, not a dialog.");
+    // The project list leads the right column, above the team room, and scrolls inside a short box.
+    const topOf = async (testId) => (await page.getByTestId(testId).boundingBox()).y;
+    await page.getByTestId("team-room").waitFor();
+    assert.ok(await topOf("project-list") < await topOf("team-room"), "The project list must sit above the team room.");
+    assert.ok(await page.getByTestId("project-list").locator(".overflow-y-auto").evaluate((box) => parseFloat(getComputedStyle(box).maxHeight)) <= 360, "The project list box stays about 360px tall.");
     // Each project in the list shows its nearest open deadline as D-n.
     const upcomingOf = (id) => page.locator(`aside a[href="/projects/${id}?view=schedule"] [data-testid="project-upcoming"]`);
     await upcomingOf("p1").waitFor();
@@ -491,6 +496,10 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
     await calendar.waitFor();
+    // Phone order: calendar, then the project list, then the team room.
+    await page.getByTestId("team-room").waitFor();
+    assert.ok(await topOf("team-calendar-inline") < await topOf("project-list"), "On a phone the calendar comes first.");
+    assert.ok(await topOf("project-list") < await topOf("team-room"), "On a phone the project list sits above the team room.");
     await page.screenshot({ path: "artifacts/dashboard-mobile.png", fullPage: true });
     // Phone dots: project deadlines are diamonds, team events filled circles, my private events hollow circles.
     const dotClass = (layer) => calendar.locator(`span[data-layer="${layer}"]:visible`).first().getAttribute("class");

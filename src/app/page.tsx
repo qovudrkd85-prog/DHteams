@@ -244,20 +244,9 @@ export default function HomePage() {
           </div>
           <aside
             className="min-w-0 space-y-4 lg:sticky lg:top-20"
-            aria-label="팀 방과 과업 목록"
+            aria-label="과업 목록과 팀 방"
           >
-            {view === "team" && (
-              <>
-                <TeamRoomMini
-                  members={workspace.members}
-                  attendance={workspace.attendance}
-                  currentMember={workspace.error ? null : workspace.currentMember}
-                />
-                <TeamPanel workspace={workspace} />
-              </>
-            )}
-            {view === "garage" && !healing && <HealingCard focusOnMount={healingEnded} onOpen={() => { setHealing(true); setHealingEnded(false); }} />}
-            <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" data-testid="project-list">
               <div className="border-b border-slate-100 p-5">
                 <div className="mb-1 flex items-center gap-2">
                   <FolderOpen className="size-4 text-teal-700" />
@@ -285,7 +274,7 @@ export default function HomePage() {
                   />
                 </div>
               </div>
-              <div className="max-h-[640px] overflow-y-auto p-2">
+              <div className="max-h-[280px] lg:max-h-[360px] overflow-y-auto p-2">
                 {loading ? (
                   <p className="p-6 text-center text-sm text-slate-500">
                     과업을 불러오는 중…
@@ -349,6 +338,17 @@ export default function HomePage() {
                 </Button>
               </div>
             </section>
+            {view === "team" && (
+              <>
+                <TeamRoomMini
+                  members={workspace.members}
+                  attendance={workspace.attendance}
+                  currentMember={workspace.error ? null : workspace.currentMember}
+                />
+                <TeamPanel workspace={workspace} />
+              </>
+            )}
+            {view === "garage" && !healing && <HealingCard focusOnMount={healingEnded} onOpen={() => { setHealing(true); setHealingEnded(false); }} />}
             <div className="rounded-2xl bg-teal-800 p-5 text-white">
               <p className="text-sm font-semibold">
                 일정은 함께, 기록은 차곡차곡.
