@@ -344,6 +344,7 @@ export default function HomePage() {
                   members={workspace.members}
                   attendance={workspace.attendance}
                   currentMember={workspace.error ? null : workspace.currentMember}
+                  onEnterGarage={() => changeView("garage")}
                 />
                 <TeamPanel workspace={workspace} />
               </>

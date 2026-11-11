@@ -118,6 +118,78 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     await page.keyboard.up("ArrowDown");
     await meInRoom.waitFor();
 
+    // Garage door: walk near first, then E / Enter / button. F sits and stands. Keys never fire from inputs.
+    const tabSelected = (tab) => page.evaluate((t) => document.querySelector(`[data-testid="hub-tab-${t}"]`)?.getAttribute("aria-selected") === "true", tab);
+    const door = page.getByTestId("team-room-door");
+    const enter = page.getByTestId("team-room-enter");
+    const stand = page.getByTestId("team-room-stand");
+    const doorSpot = { x: Number(await door.getAttribute("data-x")), y: Number(await door.getAttribute("data-y")) };
+    const away = await settled();
+    assert.ok(Math.hypot(away.x - doorSpot.x, away.y - doorSpot.y) >= 150, "This check must start away from the door.");
+    assert.equal(await enter.count(), 0, "The enter button waits until I am near the door.");
+    await roomView.focus();
+    await page.keyboard.press("e");
+    await page.waitForTimeout(200);
+    assert.equal(await tabSelected("team"), true, "E far from the door must not leave the team tab.");
+    const search = page.getByLabel("과업 검색", { exact: true });
+    await search.fill("");
+    await search.focus();
+    await page.keyboard.type("ef");
+    await page.waitForTimeout(300);
+    assert.equal(await search.inputValue(), "ef", "Typing in the search field keeps the letters.");
+    assert.equal(await tabSelected("team"), true, "Typing e in a field must not enter the garage.");
+    assert.equal(await stand.count(), 0, "Typing f in a field must not sit me down.");
+    await search.fill("");
+    const seatedWrites = () => state.requests.filter((r) => r.table === "team_presence" && r.method !== "GET" && r.body?.motion === "seated").length;
+    const seatedBefore = seatedWrites();
+    await roomView.focus();
+    await page.keyboard.down("f");
+    await page.keyboard.down("f");
+    await page.keyboard.down("f");
+    await page.keyboard.up("f");
+    await stand.waitFor();
+    await page.waitForTimeout(800);
+    assert.equal(await stand.count(), 1, "A held F must not toggle back up.");
+    assert.equal(seatedWrites() - seatedBefore, 1, "A held F must save the seat once.");
+    // Korean IME: key is "ㄹ" but code stays KeyF.
+    await roomView.evaluate((el) => el.dispatchEvent(new KeyboardEvent("keydown", { key: "ㄹ", code: "KeyF", bubbles: true, cancelable: true })));
+    await sit.waitFor();
+    // After a mouse click on the sit button, focus returns to the room so F still works.
+    await sit.click();
+    await stand.waitFor();
+    await page.keyboard.press("f");
+    await sit.waitFor();
+    // Tap the door: I walk there and the enter button appears.
+    await meInRoom.waitFor();
+    await roomView.scrollIntoViewIfNeeded();
+    const doorPoint = await roomPoint(doorSpot.x, doorSpot.y);
+    await page.mouse.click(doorPoint.x, doorPoint.y);
+    await enter.waitFor();
+    const atDoor = await settled();
+    assert.ok(Math.hypot(atDoor.x - doorSpot.x, atDoor.y - doorSpot.y) < 150, `Tapping the door must walk me near it (got ${atDoor.x},${atDoor.y}).`);
+    assert.match(await enter.textContent(), /들어가기/);
+    // Korean IME E ("ㄷ", KeyE) enters; the tab is remembered across a reload.
+    await roomView.evaluate((el) => el.dispatchEvent(new KeyboardEvent("keydown", { key: "ㄷ", code: "KeyE", bubbles: true, cancelable: true })));
+    await page.getByTestId("garage").waitFor();
+    assert.equal(await tabSelected("garage"), true, "E near the door enters my garage.");
+    await page.reload();
+    await page.getByTestId("garage").waitFor();
+    assert.equal(await tabSelected("garage"), true, "The garage tab survives a reload.");
+    // Coming back: still by the door, no automatic re-entry; the button and Enter both go in.
+    await openTab("team");
+    await enter.waitFor();
+    await page.waitForTimeout(300);
+    assert.equal(await tabSelected("team"), true, "Returning to the team tab must not re-enter on its own.");
+    await enter.click();
+    await page.getByTestId("garage").waitFor();
+    await openTab("team");
+    await enter.waitFor();
+    await roomView.focus();
+    await page.keyboard.press("Enter");
+    await page.getByTestId("garage").waitFor();
+    await openTab("team");
+    await meInRoom.waitFor();
+
     // The chosen tab survives a reload.
     await openTab("garage");
     await page.getByTestId("garage").waitFor();
@@ -202,7 +274,14 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     await page.waitForFunction((x) => Number(document.querySelector("[data-testid=team-room-me]")?.getAttribute("data-x")) !== x, phoneStart.x);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "Walking must not widen the mobile page.");
     await page.screenshot({ path: path.resolve("artifacts", "game-world-mobile.png"), fullPage: true });
+    // Mobile: tap the door, then tap the enter button.
+    const phoneDoor = await roomPoint(doorSpot.x, doorSpot.y);
+    await page.mouse.click(phoneDoor.x, phoneDoor.y);
+    await enter.waitFor();
+    await enter.click();
+    await page.getByTestId("garage").waitFor();
+    assert.equal(await tabSelected("garage"), true, "Mobile: door then button enters the garage.");
     assert.deepEqual(errors, []);
-    console.log("PASS: inline team calendar and room, other member seated, status retry, sit once/stand, tab memory across reload, garage -> inline healing (weather start zone, fast travel, walk to rod, seam walk, Esc back, status restore), no healing after team tab trip, mobile width + tap to walk.");
+    console.log("PASS: inline team calendar and room, other member seated, status retry, sit once/stand, garage door (two-step E/Enter/button, F sit/stand, IME codes, no keys from inputs), tab memory across reload, garage -> inline healing (weather start zone, fast travel, walk to rod, seam walk, Esc back, status restore), no healing after team tab trip, mobile width + tap to walk.");
   } finally { await browser.close(); }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

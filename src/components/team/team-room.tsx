@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent
 import { LoaderCircle, RotateCw, Users } from "lucide-react";
 
 import { claimOfficeSeat } from "@/lib/team/presence";
-import { pickTeamRoom, withOwnDesk } from "@/lib/team/rooms";
+import { garageDoor, nearGarageDoor, pickTeamRoom, withOwnDesk } from "@/lib/team/rooms";
 import { useOfficePresence } from "@/lib/team/use-office-presence";
 import {
   listOfficeLayouts, officeDateKey, saveOfficeLayout,
@@ -19,6 +19,8 @@ interface TeamRoomMiniProps {
   members: TeamMember[];
   attendance: Attendance[];
   currentMember: TeamMember | null;
+  /** Called when I go through the door to my garage (button, E/Enter near the door, or a second tap on the door). */
+  onEnterGarage?: () => void;
 }
 
 // The room is ~1600 units wide but shown ~340px wide: draw characters larger so they stay readable.
@@ -29,8 +31,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "팀 방을 불러오지 못했어요.";
 }
 
-/** One room per team: a desk per member. Walk by tapping the floor or with arrow keys; portals and decorating are not offered here. */
-export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMiniProps) {
+function GarageDoorArt({ x, y, near, onClick }: { x: number; y: number; near: boolean; onClick: (event: MouseEvent<SVGGElement>) => void }) {
+  return (
+    <g transform={`translate(${x} ${y})`} className={styles.portal} onClick={onClick} data-testid="team-room-door" data-x={x} data-y={y} data-near={near}>
+      <rect x="-130" y="-45" width="260" height="150" fill="transparent" pointerEvents="all" />
+      <ellipse cy="3" rx="95" ry="36" fill={near ? "#dcefa170" : "#70998730"} stroke="#5d927b" strokeWidth="3" strokeDasharray="8 8" />
+      <rect x="-125" y="42" width="250" height="56" rx="28" fill="#fffdf1" stroke="#c2cfb9" strokeWidth="2" />
+      <text y="82" textAnchor="middle" fontSize="38" fontWeight="600" fill="#466450">내 정비실 ↗</text>
+    </g>
+  );
+}
+
+/** One room per team: a desk per member. Walk by tapping the floor or with arrow keys; the only door leads to my garage. */
+export function TeamRoomMini({ members, attendance, currentMember, onEnterGarage }: TeamRoomMiniProps) {
   const patternId = useId().replace(/:/g, "");
   const viewportRef = useRef<HTMLDivElement>(null);
   const pendingSit = useRef<string | null>(null);
@@ -148,8 +161,40 @@ export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMin
     game.walkTo({ x: point.x, y: point.y });
   }
 
+  const door = room ? garageDoor(room) : null;
+  const nearDoor = Boolean(onEnterGarage && door && game.player && !seated && nearGarageDoor(game.player, door));
+
+  function focusRoom(): void {
+    viewportRef.current?.focus({ preventScroll: true });
+  }
+
+  function toggleSeat(): void {
+    if (seated) { game.stand(); return; }
+    if (!busyRef.current && game.player) void sitDown();
+  }
+
+  function onDoorClick(event: MouseEvent<SVGGElement>): void {
+    event.stopPropagation();
+    focusRoom();
+    if (nearDoor) onEnterGarage?.();
+    else if (door) game.walkTo(door);
+  }
+
+  // Shortcuts only while the room itself has focus (no inputs live inside it). event.code keeps E/F working under a Korean IME.
   function onRoomKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
     if (event.key === "Escape" && event.target === event.currentTarget) { event.currentTarget.blur(); return; }
+    if (event.target === event.currentTarget && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      if (event.code === "KeyF") {
+        event.preventDefault();
+        if (!event.repeat) toggleSeat();
+        return;
+      }
+      if (nearDoor && (event.code === "KeyE" || event.key === "Enter")) {
+        event.preventDefault();
+        if (!event.repeat) onEnterGarage?.();
+        return;
+      }
+    }
     game.onKeyDown(event);
   }
 
@@ -169,9 +214,10 @@ export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMin
         <div className="flex items-center justify-center gap-2 p-8 text-sm text-slate-500"><LoaderCircle className="size-4 animate-spin" /> 팀 방을 준비하고 있어요.</div>
       ) : room ? (
         <div ref={viewportRef} className={`${styles.scene} ${styles[room.theme] ?? ""} rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-teal-500`} style={{ padding: "0 8px", background: "transparent" }}
-          tabIndex={0} role="group" aria-label="팀 방. 방향키로 걷기" data-testid="team-room-view" onKeyDown={onRoomKeyDown} onKeyUp={game.onKeyUp}>
+          tabIndex={0} role="group" aria-label="팀 방. 방향키로 걷기, F 앉기, 입구 근처에서 E 들어가기" data-testid="team-room-view" onKeyDown={onRoomKeyDown} onKeyUp={game.onKeyUp}>
           <svg viewBox={`0 0 ${width} ${height}`} className="h-auto w-full cursor-pointer rounded-xl" role="img" onClick={walkHere} aria-label={`팀 방. 책상 ${desks.length}개, 접속 ${online.length}명.`}>
             <WorldArt width={width} height={height} kind="office" patternId={patternId} editing={false} />
+            {door && onEnterGarage && <GarageDoorArt x={door.x} y={door.y} near={nearDoor} onClick={onDoorClick} />}
             {desks.map((item) => {
               const member = item.member_id ? memberById.get(item.member_id) : undefined;
               const presence = member?.id === currentMember?.id ? game.player : livePeers.find((row) => row.member_id === member?.id);
@@ -197,13 +243,18 @@ export function TeamRoomMini({ members, attendance, currentMember }: TeamRoomMin
       ) : null}
       {(actionError ?? loadError) && <div className={styles.error} role="alert"><p>{actionError ?? loadError}</p>{!room && <button type="button" onClick={() => { setLoading(true); void load(); }}><RotateCw size={14} /> 다시 불러오기</button>}</div>}
       {game.syncError && <p className="px-4 pt-2 text-xs text-amber-700" role="status">{game.syncError}</p>}
-      {room && <p className="px-4 pt-3 text-xs text-slate-400">방을 누르거나 방향키로 걸어요.</p>}
-      <div className="flex gap-2 p-4">
+      {room && <p className="px-4 pt-3 text-xs text-slate-400">방을 누르거나 방향키로 걸어요<span className="hidden sm:inline"> · F 앉기{onEnterGarage ? " · E 들어가기" : ""}</span>.</p>}
+      <div className="flex flex-wrap gap-2 p-4">
         {seated ? (
-          <button type="button" className={styles.quietButton} onClick={() => game.stand()} data-testid="team-room-stand">일어나기</button>
+          <button type="button" className={styles.quietButton} aria-keyshortcuts="F" onClick={() => { game.stand(); focusRoom(); }} data-testid="team-room-stand">일어나기<span className="hidden sm:inline"> (F)</span></button>
         ) : (
-          <button type="button" className={styles.primaryButton} disabled={!room || !currentMember || busy || !game.player} onClick={() => void sitDown()} data-testid="team-room-sit">
-            {busy ? <LoaderCircle size={14} className="animate-spin" /> : null} 자리에 앉기
+          <button type="button" className={styles.primaryButton} aria-keyshortcuts="F" disabled={!room || !currentMember || busy || !game.player} onClick={() => { focusRoom(); void sitDown(); }} data-testid="team-room-sit">
+            {busy ? <LoaderCircle size={14} className="animate-spin" /> : null} 자리에 앉기<span className="hidden sm:inline"> (F)</span>
+          </button>
+        )}
+        {nearDoor && (
+          <button type="button" className={styles.primaryButton} aria-keyshortcuts="E Enter" onClick={() => onEnterGarage?.()} data-testid="team-room-enter">
+            들어가기<span className="hidden sm:inline"> (E)</span>
           </button>
         )}
       </div>
