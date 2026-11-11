@@ -53,6 +53,10 @@ const deferred = () => {
     let failSave = false;
     let failLogs = false;
     let scheduleGets = 0;
+    // D7: project_memo_items starts missing (DB without the SQL) so the memo checks above run on the fallback editor.
+    let itemsMissing = true;
+    const memoItems = [];
+    const itemPosts = [];
     await context.route("**/*", (route) => {
       const url = new URL(route.request().url());
       return url.origin === new URL(baseURL).origin ? route.continue() : route.abort();
@@ -123,6 +127,28 @@ const deferred = () => {
         const updatedAt = body.updated_at || stamp();
         memos.set(key, { content: body.content, updated_at: updatedAt });
         return route.fulfill({ json: { updated_at: updatedAt } });
+      }
+      if (table === "project_memo_items") {
+        if (itemsMissing) return route.fulfill({ status: 404, json: { code: "PGRST205", message: "Could not find the table 'public.project_memo_items' in the schema cache" } });
+        if (method === "GET") {
+          const key = url.searchParams.get("month").slice(3);
+          const live = memoItems.filter((row) => row.month === key && !row.deleted_at);
+          return route.fulfill({ json: live.sort((a, b) => b.created_at.localeCompare(a.created_at)).map((row) => ({ ...row })) });
+        }
+        if (method === "POST") {
+          itemPosts.push(body);
+          const input = Array.isArray(body) ? body[0] : body;
+          // The server trigger stamps the author; the client never sends it.
+          const at = stamp();
+          const row = { id: `mi${memoItems.length + 1}`, project_id: input.project_id, month: input.month, content: input.content, created_by: "11111111-1111-4111-8111-111111111111", creator_name: "김담당", created_at: at, updated_at: at, deleted_at: null };
+          memoItems.push(row);
+          return route.fulfill({ status: 201, json: { ...row } });
+        }
+        // PATCH id=eq.<id>&updated_at=eq.<token>: a stale token matches no row.
+        const row = memoItems.find((r) => `eq.${r.id}` === url.searchParams.get("id"));
+        if (!row || url.searchParams.get("updated_at") !== `eq.${row.updated_at}`) return route.fulfill({ json: null });
+        Object.assign(row, body, { updated_at: stamp() });
+        return route.fulfill({ json: { ...row } });
       }
       return route.fulfill({ json: [] });
     });
@@ -396,8 +422,84 @@ const deferred = () => {
     await page.getByRole("button", { name: "설계보고서.hwp", exact: true }).click();
     await actor.waitFor();
     assert.equal(await actor.inputValue(), "", "A reloaded log keeps the cleared actor.");
+
+    // D7: with project_memo_items present the month notes become items with authors.
+    itemsMissing = false;
+    for (let i = 1; i <= 8; i++) {
+      const at = stamp();
+      memoItems.push({ id: `old${i}`, project_id: "p1", month, content: `주요사항 ${i}`, created_by: null, creator_name: i % 2 ? "김민수" : "이지은", created_at: at, updated_at: at, deleted_at: null });
+    }
+    await page.goto(`${baseURL}/projects/p1`);
+    await openSchedule();
+    const itemsBox = page.getByTestId("memo-items");
+    const itemRows = itemsBox.locator("li");
+    const itemRow = (content) => itemsBox.getByTitle(content, { exact: true });
+    await itemRow("주요사항 8").waitFor();
+    assert.equal(await page.getByRole("textbox", { name: `${month} 주요사항`, exact: true }).count(), 0, "No single memo textarea when items exist.");
+    assert.equal(await itemRows.count(), 5);
+    await itemsBox.getByRole("button", { name: "3건 더 보기", exact: true }).waitFor();
+    await itemsBox.getByText("8건", { exact: true }).waitFor();
+    const rowTexts = await itemRows.allInnerTexts();
+    assert.ok(rowTexts[0].includes("주요사항 8"), `Newest first: ${rowTexts[0]}`);
+    assert.ok(rowTexts.every((text) => /김민수|이지은/.test(text)), `Every row shows its author: ${rowTexts.join(" | ")}`);
+    await itemsBox.getByRole("button", { name: "3건 더 보기", exact: true }).click();
+    assert.equal(await itemRows.count(), 8);
+    await itemsBox.getByRole("button", { name: "접기", exact: true }).click();
+    assert.equal(await itemRows.count(), 5);
+
+    // Add with Enter: only project, month and text go to the server; the new item is on top.
+    const addInput = page.getByRole("textbox", { name: `${month} 주요사항 추가`, exact: true });
+    await addInput.fill("새로 적은 주요사항");
+    await addInput.press("Enter");
+    await itemRow("새로 적은 주요사항").waitFor();
+    const posted = Array.isArray(itemPosts.at(-1)) ? itemPosts.at(-1)[0] : itemPosts.at(-1);
+    assert.deepEqual(Object.keys(posted).sort(), ["content", "month", "project_id"], "POST must not carry author fields.");
+    assert.ok((await itemRows.first().innerText()).includes("새로 적은 주요사항"));
+    assert.ok((await itemRows.first().innerText()).includes("김담당"));
+    assert.equal(await addInput.inputValue(), "");
+    await itemsBox.getByText("9건", { exact: true }).waitFor();
+
+    // Esc cancels an edit without writing.
+    const editInput = page.getByRole("textbox", { name: `${month} 주요사항 고치기`, exact: true });
+    await itemRow("주요사항 6").click();
+    await editInput.fill("취소할 글");
+    await editInput.press("Escape");
+    await itemRow("주요사항 6").waitFor();
+    assert.equal(memoItems.find((r) => r.id === "old6").content, "주요사항 6");
+
+    // Edit conflict: a teammate changed the item after we read it. My text stays.
+    const old8 = memoItems.find((r) => r.id === "old8");
+    await itemRow("주요사항 8").click();
+    await editInput.fill("내가 고친 주요사항");
+    old8.content = "동료가 고친 주요사항";
+    old8.updated_at = stamp();
+    await editInput.press("Enter");
+    await itemsBox.getByText("다른 팀원이 이 항목을 먼저 고쳤습니다", { exact: true }).waitFor();
+    assert.equal(await editInput.inputValue(), "내가 고친 주요사항");
+    assert.equal(old8.content, "동료가 고친 주요사항", "A stale edit must not overwrite the teammate.");
+    await editInput.press("Enter");
+    await itemRow("내가 고친 주요사항").waitFor();
+    assert.equal(old8.content, "내가 고친 주요사항", "Saving again after the conflict succeeds.");
+
+    // Delete, then undo from the toast.
+    const old7 = memoItems.find((r) => r.id === "old7");
+    await itemRow("주요사항 7").hover();
+    await itemsBox.getByRole("button", { name: "주요사항 7 지우기", exact: true }).click();
+    await itemRow("주요사항 7").waitFor({ state: "hidden" });
+    assert.ok(old7.deleted_at, "Delete is a soft delete.");
+    await page.getByRole("button", { name: "되돌리기", exact: true }).click();
+    await itemRow("주요사항 7").waitFor();
+    assert.equal(old7.deleted_at, null);
+
+    // A teammate's new item arrives on focus.
+    const peerAt = stamp();
+    memoItems.push({ id: "peer-item", project_id: "p1", month, content: "동료가 방금 올린 주요사항", created_by: null, creator_name: "이지은", created_at: peerAt, updated_at: peerAt, deleted_at: null });
+    await addInput.evaluate((el) => el.blur());
+    await fireFocus();
+    await itemRow("동료가 방금 올린 주요사항").waitFor();
+    assert.ok((await itemRows.first().innerText()).includes("동료가 방금 올린 주요사항"));
     assert.deepEqual(errors, []);
-    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height.");
+    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height (all on the fallback editor); D7 memo items fold/author/add without author fields/esc/edit conflict/delete undo/peer refresh.");
   } finally {
     await browser.close();
   }

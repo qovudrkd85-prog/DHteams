@@ -4,6 +4,7 @@ import { Pin } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { MonthMemoItems } from "@/components/month-memo-items";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -12,6 +13,7 @@ import {
   saveMemoChecked,
   type MemoSnapshot,
 } from "@/lib/queries";
+import { listMemoItems, MemoItemsUnavailableError, type MemoItem } from "@/lib/memo-items";
 import { memoLineCount, shouldRefreshMemo, type MemoStatus } from "@/lib/schedule-view";
 
 interface MonthMemoProps {
@@ -54,9 +56,73 @@ function waitForSaves(key: string) {
   return (saves.get(key) ?? Promise.resolve()).catch(() => undefined);
 }
 
+// Once the items table is known to be missing, later months go straight to the old editor.
+// A page reload checks again (e.g. after the SQL is applied).
+let itemsUnavailable = false;
+
+type LoaderState = { kind: "loading" } | { kind: "error" } | { kind: "editor" } | { kind: "items"; items: MemoItem[] };
+
 /** 달력 아래 고정 메모 — 이번 달 주요 사항을 팀 전체가 같이 본다 */
 export function MonthMemo({ projectId, month }: MonthMemoProps) {
-  return <MonthMemoEditor key={memoKey(projectId, month)} projectId={projectId} month={month} />;
+  return <MonthMemoLoader key={memoKey(projectId, month)} projectId={projectId} month={month} />;
+}
+
+// Itemized notes when project_memo_items exists; otherwise the single-text editor (D5).
+function MonthMemoLoader({ projectId, month }: MonthMemoProps) {
+  const [state, setState] = useState<LoaderState>(() =>
+    itemsUnavailable ? { kind: "editor" } : { kind: "loading" },
+  );
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (itemsUnavailable) return;
+    let cancelled = false;
+    listMemoItems(projectId, month).then(
+      (items) => {
+        if (!cancelled) setState({ kind: "items", items });
+      },
+      (error) => {
+        if (cancelled) return;
+        if (error instanceof MemoItemsUnavailableError) {
+          itemsUnavailable = true;
+          setState({ kind: "editor" });
+          return;
+        }
+        setState({ kind: "error" });
+        toast.error(error instanceof Error ? error.message : "메모를 불러오지 못했습니다.");
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, month, attempt]);
+
+  if (state.kind === "editor") return <MonthMemoEditor projectId={projectId} month={month} />;
+  if (state.kind === "items") return <MonthMemoItems projectId={projectId} month={month} initialItems={state.items} />;
+  return (
+    <section className="rounded-lg border bg-amber-50 p-3">
+      <div className="flex items-center gap-1.5 text-sm font-medium text-amber-900">
+        <Pin className="size-4" />
+        {month.replace("-", "년 ")}월 주요사항
+        <span aria-live="polite" className="ml-auto text-xs font-normal text-amber-700">
+          {state.kind === "error" ? "불러오기 실패" : "불러오는 중..."}
+        </span>
+        {state.kind === "error" ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setState({ kind: "loading" });
+              setAttempt((n) => n + 1);
+            }}
+          >
+            다시 시도
+          </Button>
+        ) : null}
+      </div>
+    </section>
+  );
 }
 
 function MonthMemoEditor({ projectId, month }: MonthMemoProps) {
