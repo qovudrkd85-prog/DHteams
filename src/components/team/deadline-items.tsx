@@ -18,8 +18,9 @@ export function DeadlineChip({ deadline, tone }: { deadline: ProjectDeadline; to
       href={`/projects/${deadline.project_id}?view=schedule`}
       title={deadlineTitle(deadline)}
       data-deadline={deadline.done ? "done" : "open"}
+      data-layer="project"
       className={cn(
-        "block w-full truncate rounded border-l-2 px-1.5 py-1 text-left text-[11px]",
+        "block w-full truncate rounded border-l-4 px-1.5 py-1 text-left text-[11px]",
         (tone ?? projectTone(deadline.project_id)).chip,
         deadline.done && "opacity-60 line-through",
       )}

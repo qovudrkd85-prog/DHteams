@@ -751,16 +751,20 @@ export function DepartmentCalendar({
                   <span
                     key={deadline.id}
                     title={`${DEADLINE_STYLE.label} · ${deadline.project_name} · ${deadline.title}`}
-                    className={cn("size-1.5 rounded-full", toneFor(toneMap, deadline.project_id).dot)}
+                    data-layer="project"
+                    className={cn("size-1.5 rotate-45", toneFor(toneMap, deadline.project_id).dot)}
                   />
                 ))}
                 {items.slice(0, Math.max(0, 5 - due.length)).map((item) => (
                   <span
                     key={item.id}
                     title={`${item.title} · 등록자: ${item.creator_name || "미지정"}`}
+                    data-layer={item.visibility === "private" ? "private" : "team"}
                     className={cn(
                       "size-1.5 rounded-full",
-                      EVENT_CATEGORIES[item.category].dot,
+                      item.visibility === "private"
+                        ? "border border-slate-500 bg-white"
+                        : EVENT_CATEGORIES[item.category].dot,
                     )}
                   />
                 ))}

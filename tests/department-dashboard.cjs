@@ -260,6 +260,9 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await deadline.first().waitFor();
     await page.locator('button[title^="회의 · 부서 주간회의 ·"]').first().waitFor();
     assert.equal(await monthCountText(), countAll, "Turning the chip off restores the count.");
+    // Desktop cells: project deadlines carry a thick project-coloured stripe.
+    const projectChipClass = await calendar.locator('a[data-layer="project"]').first().getAttribute("class");
+    assert.ok(projectChipClass.includes("border-l-4"), projectChipClass);
     // This month's project schedules, one group per team project that has any (PC: open by default).
     const monthList = calendar.getByTestId("month-deadline-list");
     assert.equal(await monthList.locator("button[aria-expanded]").getAttribute("aria-expanded"), "true");
@@ -489,6 +492,19 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await page.reload();
     await calendar.waitFor();
     await page.screenshot({ path: "artifacts/dashboard-mobile.png", fullPage: true });
+    // Phone dots: project deadlines are diamonds, team events filled circles, my private events hollow circles.
+    const dotClass = (layer) => calendar.locator(`span[data-layer="${layer}"]:visible`).first().getAttribute("class");
+    await calendar.locator('span[data-layer="project"]:visible').first().waitFor();
+    assert.ok((await dotClass("project")).includes("rotate-45"), await dotClass("project"));
+    assert.ok(!(await dotClass("project")).includes("rounded-full"));
+    assert.ok((await dotClass("team")).includes("rounded-full"));
+    assert.ok(!(await dotClass("team")).includes("border"));
+    assert.equal(await calendar.locator('span[data-layer="private"]:visible').count(), 0, "Team scope: no private dots.");
+    await page.getByRole("button", { name: "통합(+내 개인)", exact: true }).click();
+    await calendar.locator('span[data-layer="private"]:visible').first().waitFor();
+    assert.ok((await dotClass("private")).includes("border"), await dotClass("private"));
+    await page.getByRole("button", { name: "팀", exact: true }).click();
+    await calendar.locator('span[data-layer="private"]:visible').first().waitFor({ state: "detached" });
     // Phones keep the month list folded until asked.
     assert.equal(await calendar.getByTestId("month-deadline-list").locator("button[aria-expanded]").getAttribute("aria-expanded"), "false");
     await openCalendar();
@@ -555,7 +571,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.notEqual(await page.getByRole("button", { name: "과업 마감", exact: true }).getAttribute("aria-pressed"), "true");
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: inline team calendar, month/filters kept across tabs, nested editor focus, search/navigation links, project D-n badges, legend and project chips, team isolation, team-first scope, month project list, project focus link, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
+      "PASS: inline team calendar, month/filters kept across tabs, nested editor focus, search/navigation links, project D-n badges, legend and project chips, team isolation, team-first scope, month project list, layer shapes, project focus link, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
       writes,
     );
   } finally {
