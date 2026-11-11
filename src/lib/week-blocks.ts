@@ -30,3 +30,43 @@ export function orderBetween(a: number, b?: number | null): number {
   if (b == null) return a + 1;
   return (a + b) / 2;
 }
+
+export type BlockKind = "todo" | "text" | "h1" | "h2" | "h3" | "bullet" | "number";
+
+// Longest marks first so "### " is not read as "# ".
+const SHORTCUTS: ReadonlyArray<readonly [string, BlockKind]> = [
+  ["### ", "h3"],
+  ["## ", "h2"],
+  ["# ", "h1"],
+  ["- ", "bullet"],
+  ["* ", "bullet"],
+  ["1. ", "number"],
+  ["[ ] ", "todo"],
+  ["[] ", "todo"],
+];
+
+/** Markdown mark at the very start of a line ("## 제목") -> new kind and the text without the mark. */
+export function parseShortcut(value: string): { kind: BlockKind; text: string } | null {
+  for (const [mark, kind] of SHORTCUTS) {
+    if (value.startsWith(mark)) return { kind, text: value.slice(mark.length) };
+  }
+  return null;
+}
+
+/** Display numbers for number rows: each consecutive run counts from 1; other rows get null. */
+export function numberLabels(items: readonly KindLike[]): (number | null)[] {
+  let run = 0;
+  return items.map((item) => {
+    if (item.kind !== "number") {
+      run = 0;
+      return null;
+    }
+    run += 1;
+    return run;
+  });
+}
+
+/** Kind for the next line after Enter: lists and to-dos carry on, headings and text go back to to-do. */
+export function stickyKind(kind: BlockKind): BlockKind {
+  return kind === "bullet" || kind === "number" ? kind : "todo";
+}

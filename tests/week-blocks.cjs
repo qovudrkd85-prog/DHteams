@@ -61,4 +61,35 @@ assert.equal(wb.orderBetween(3, null), 4);
 const mid = wb.orderBetween(1, 1.0001);
 assert.ok(mid > 1 && mid < 1.0001, "midpoint strictly between");
 
-console.log("PASS: week-blocks (isTodo, orderDay stable/immutable, nextOrder, orderBetween).");
+// parseShortcut (D10): a Markdown prefix at the very start switches the line kind.
+assert.deepEqual(plain(wb.parseShortcut("# 가")), { kind: "h1", text: "가" });
+assert.deepEqual(plain(wb.parseShortcut("## 현장조사")), { kind: "h2", text: "현장조사" });
+assert.deepEqual(plain(wb.parseShortcut("### 소제목")), { kind: "h3", text: "소제목" });
+assert.deepEqual(plain(wb.parseShortcut("- 목차")), { kind: "bullet", text: "목차" });
+assert.deepEqual(plain(wb.parseShortcut("* 목차")), { kind: "bullet", text: "목차" });
+assert.deepEqual(plain(wb.parseShortcut("1. 초안")), { kind: "number", text: "초안" });
+assert.deepEqual(plain(wb.parseShortcut("[] 할 일")), { kind: "todo", text: "할 일" });
+assert.deepEqual(plain(wb.parseShortcut("[ ] 할 일")), { kind: "todo", text: "할 일" });
+// The prefix alone (space just typed) converts with empty text.
+assert.deepEqual(plain(wb.parseShortcut("## ")), { kind: "h2", text: "" });
+assert.deepEqual(plain(wb.parseShortcut("- ")), { kind: "bullet", text: "" });
+// No space after the mark, or not at the start: plain text.
+for (const value of ["#가", "가 # ", " # 가", "##가", "-가", "1.가", "[]가", "", "가나다"]) {
+  assert.equal(wb.parseShortcut(value), null, JSON.stringify(value));
+}
+
+// numberLabels: consecutive number rows count from 1; anything else breaks the run.
+assert.deepEqual(
+  plain(wb.numberLabels([{ kind: "number" }, { kind: "number" }, { kind: "text" }, { kind: "number" }])),
+  [1, 2, null, 1],
+);
+assert.deepEqual(plain(wb.numberLabels([{}, { kind: "number" }, { kind: "todo" }, { kind: "number" }, { kind: "number" }, { kind: "number" }])), [null, 1, null, 1, 2, 3]);
+assert.deepEqual(plain(wb.numberLabels([])), []);
+
+// stickyKind: to-do, bullet and number carry on to the next line; headings and text fall back to to-do.
+assert.equal(wb.stickyKind("todo"), "todo");
+assert.equal(wb.stickyKind("bullet"), "bullet");
+assert.equal(wb.stickyKind("number"), "number");
+for (const kind of ["h1", "h2", "h3", "text"]) assert.equal(wb.stickyKind(kind), "todo", kind);
+
+console.log("PASS: week-blocks (isTodo, orderDay stable/immutable, nextOrder, orderBetween, parseShortcut, numberLabels, stickyKind).");

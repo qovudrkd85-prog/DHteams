@@ -54,6 +54,7 @@ const deferred = () => {
     let failSave = false;
     let failLogs = false;
     let scheduleGets = 0;
+    let failKindPost = false;
     // D7: project_memo_items starts missing (DB without the SQL) so the memo checks above run on the fallback editor.
     let itemsMissing = true;
     const memoItems = [];
@@ -88,6 +89,10 @@ const deferred = () => {
           // D8 quick add from the week board.
           schedulePosts.push(body);
           const input = Array.isArray(body) ? body[0] : body;
+          // D10: a DB without schema-schedule-blocks.sql rejects the unknown body key.
+          if (failKindPost && ("kind" in input || "sort_order" in input)) {
+            return route.fulfill({ status: 400, json: { code: "PGRST204", message: "Could not find the 'kind' column of 'schedules' in the schema cache" } });
+          }
           const at = stamp();
           const row = { ...input, id: `new${schedulePosts.length}`, project_id: "p1", done: false, created_at: at, updated_at: at, deleted_at: null };
           schedules.push(row);
@@ -672,8 +677,163 @@ const deferred = () => {
     await viewToggle.getByRole("button", { name: "월", exact: true }).click();
     await page.getByText(`남은 일 ${remainingBefore + 2}건`, { exact: true }).waitFor();
     assert.equal(await board.count(), 0);
+
+    // D10: block kinds, Markdown shortcuts and inserting between lines. The kind column is present
+    // here (the D9 rows carry kind), so the board sends kind and sort_order.
+    await viewToggle.getByRole("button", { name: "주", exact: true }).click();
+    const sat = addDaysKey(monday, 5);
+    const sun = addDaysKey(monday, 6);
+    const satCell = board.locator(`[data-week-day="${sat}"]`);
+    const sunCell = board.locator(`[data-week-day="${sun}"]`);
+    const satAdd = board.getByRole("textbox", { name: `${sat} 할 일 추가`, exact: true });
+    const kindRow = (cell, kind, title) => cell.locator(`[data-week-row][data-kind="${kind}"]`).filter({ hasText: title });
+    const lastPost = () => { const b = schedulePosts.at(-1); return Array.isArray(b) ? b[0] : b; };
+    const expectedNext = (day) => {
+      const rows = schedules.filter((row) => row.due_date === day && !row.deleted_at);
+      return rows.length ? Math.max(...rows.map((row) => row.sort_order ?? 0)) + 1 : 1;
+    };
+    await satAdd.waitFor();
+
+    // 1. "## " turns the add input into a heading; Enter posts kind h2 at the end of the day.
+    let expectedOrder = expectedNext(sat);
+    let postCount = schedulePosts.length;
+    await satAdd.fill("## 현장조사");
+    assert.equal(await satAdd.inputValue(), "현장조사", "The shortcut mark is removed.");
+    assert.equal(await satAdd.getAttribute("placeholder"), "제목2");
+    await satAdd.press("Enter");
+    await kindRow(satCell, "h2", "현장조사").waitFor();
+    assert.equal(schedulePosts.length, postCount + 1);
+    assert.equal(lastPost().kind, "h2");
+    assert.equal(lastPost().title, "현장조사");
+    assert.equal(lastPost().sort_order, expectedOrder, "A new line goes after the day's last line.");
+    assert.equal(await kindRow(satCell, "h2", "현장조사").getByRole("checkbox").count(), 0, "A heading has no checkbox.");
+    assert.equal(await satAdd.getAttribute("placeholder"), "+ 추가", "A heading does not carry on to the next line.");
+    assert.equal(await satAdd.evaluate((el) => el === document.activeElement), true);
+
+    // 2. Bullets carry on; an empty Enter goes back to a to-do. Backspace on an empty input does too.
+    await satAdd.fill("- 목차");
+    await satAdd.press("Enter");
+    await kindRow(satCell, "bullet", "목차").waitFor();
+    assert.equal(await satAdd.getAttribute("data-draft-kind"), "bullet");
+    await satAdd.fill("세부");
+    await satAdd.press("Enter");
+    await kindRow(satCell, "bullet", "세부").waitFor();
+    assert.equal(lastPost().kind, "bullet");
+    assert.equal(lastPost().title, "세부");
+    assert.ok((await kindRow(satCell, "bullet", "세부").innerText()).includes("•"), "A bullet row shows a dot.");
+    postCount = schedulePosts.length;
+    await satAdd.press("Enter");
+    assert.equal(await satAdd.getAttribute("placeholder"), "+ 추가");
+    assert.equal(await satAdd.getAttribute("data-draft-kind"), "todo");
+    assert.equal(schedulePosts.length, postCount, "An empty Enter posts nothing.");
+    await satAdd.fill("- ");
+    assert.equal(await satAdd.getAttribute("data-draft-kind"), "bullet");
+    assert.equal(await satAdd.inputValue(), "");
+    await satAdd.press("Backspace");
+    assert.equal(await satAdd.getAttribute("data-draft-kind"), "todo");
+
+    // 3. Numbered lines count from 1 on screen.
+    await satAdd.fill("1. 가");
+    await satAdd.press("Enter");
+    await kindRow(satCell, "number", "가").waitFor();
+    await satAdd.fill("나");
+    await satAdd.press("Enter");
+    await kindRow(satCell, "number", "나").waitFor();
+    assert.equal(lastPost().kind, "number");
+    const numberTexts = await satCell.locator('[data-week-row][data-kind="number"]').allInnerTexts();
+    assert.deepEqual(numberTexts.map((text) => text.trim().slice(0, 2)), ["1.", "2."], `Number labels: ${numberTexts.join(" | ")}`);
+    await satAdd.press("Enter");
+    assert.equal(await satAdd.getAttribute("data-draft-kind"), "todo");
+
+    // 4. Month view: block lines stay off the date cell and the remaining count.
+    await viewToggle.getByRole("button", { name: "월", exact: true }).click();
+    await page.getByText(`남은 일 ${remainingBefore + 2}건`, { exact: true }).waitFor();
+    for (const title of ["현장조사", "목차", "세부"]) {
+      assert.equal(await page.getByText(title, { exact: true }).count(), 0, `${title} is not in the month view.`);
+    }
+    await viewToggle.getByRole("button", { name: "주", exact: true }).click();
+
+    // 5. "# " at the start of a to-do's edit input makes it a heading: PATCH kind, done false, title.
+    await rowOf(friCell, "금 할 일 무종류").getByRole("button", { name: "금 할 일 무종류", exact: true }).click();
+    await rowEdit.press("Home");
+    await page.keyboard.type("# ");
+    assert.equal(await rowEdit.inputValue(), "금 할 일 무종류");
+    assert.equal(await rowEdit.getAttribute("data-draft-kind"), "h1");
+    await rowEdit.press("Enter");
+    await kindRow(friCell, "h1", "금 할 일 무종류").waitFor();
+    const kindPatch = schedulePatches.at(-1);
+    assert.equal(kindPatch.id, "f1");
+    assert.equal(kindPatch.body.kind, "h1");
+    assert.equal(kindPatch.body.done, false);
+    assert.equal(kindPatch.body.title, "금 할 일 무종류");
+    const friInsert = board.getByRole("textbox", { name: `${fri} 줄 사이 추가`, exact: true });
+    await friInsert.waitFor();
+    await friInsert.press("Escape");
+    await friInsert.waitFor({ state: "hidden" });
+
+    // 6. Enter in a line's edit input opens an empty line right below; it saves between its neighbours.
+    schedules.push(
+      weekRow("g1", "일 첫 줄", sun, { kind: "todo", sort_order: 1 }),
+      weekRow("g2", "일 둘째 줄", sun, { kind: "text", sort_order: 2 }),
+    );
+    await fireFocus();
+    await kindRow(sunCell, "text", "일 둘째 줄").waitFor();
+    await rowOf(sunCell, "일 첫 줄").getByRole("button", { name: "일 첫 줄", exact: true }).click();
+    await rowEdit.press("Enter");
+    const sunInsert = board.getByRole("textbox", { name: `${sun} 줄 사이 추가`, exact: true });
+    await sunInsert.waitFor();
+    assert.equal(await sunInsert.evaluate((el) => el === document.activeElement), true, "The new empty line has focus.");
+    const between = async (el, before, after) => el.evaluate((node, [a, b]) => {
+      const first = document.querySelector(`[data-week-row="${a}"]`);
+      const last = document.querySelector(`[data-week-row="${b}"]`);
+      return Boolean(first.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && Boolean(node.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }, [before, after]);
+    assert.equal(await between(sunInsert, "g1", "g2"), true, "The draft sits between the two lines.");
+    postCount = schedulePosts.length;
+    await sunInsert.fill("사이 줄");
+    await sunInsert.press("Enter");
+    await rowOf(sunCell, "사이 줄").waitFor();
+    assert.equal(schedulePosts.length, postCount + 1);
+    assert.equal(lastPost().sort_order, 1.5, "Inserted between sort_order 1 and 2.");
+    assert.equal(lastPost().title, "사이 줄");
+    const sunTexts = await sunCell.locator("[data-week-row]").allInnerTexts();
+    const sunOrder = ["일 첫 줄", "사이 줄", "일 둘째 줄"].map((title) => sunTexts.findIndex((text) => text.includes(title)));
+    assert.ok(sunOrder.every((index, i) => index >= 0 && (i === 0 || index > sunOrder[i - 1])), `Inserted in place: ${sunTexts.join(" | ")}`);
+    await sunInsert.waitFor();
+    assert.equal(await sunInsert.inputValue(), "");
+    assert.equal(await sunInsert.evaluate((el) => el === document.activeElement), true, "Typing carries on below the new line.");
+    await sunInsert.press("Escape");
+    await sunInsert.waitFor({ state: "hidden" });
+
+    // 7a. Insert rejected for a missing column (PGRST204): saved again without kind/sort_order, as a to-do.
+    failKindPost = true;
+    postCount = schedulePosts.length;
+    await satAdd.fill("## 재시도");
+    await satAdd.press("Enter");
+    await rowOf(satCell, "재시도").getByRole("checkbox").waitFor();
+    assert.equal(schedulePosts.length, postCount + 2, "One rejected POST, one retry.");
+    assert.ok(!("kind" in lastPost()) && !("sort_order" in lastPost()), `Retry has no block keys: ${Object.keys(lastPost()).join(",")}`);
+
+    // 7b. No kind column (rows come back without kind): D8 behaviour, no shortcuts, no block keys.
+    schedules.forEach((row) => { delete row.kind; delete row.sort_order; });
+    await fireFocus();
+    await rowOf(sunCell, "일 둘째 줄").getByRole("checkbox").waitFor();
+    assert.equal(await sunCell.locator('[data-week-row][data-kind="text"]').count(), 0, "Rows without kind are to-dos.");
+    postCount = schedulePosts.length;
+    await satAdd.fill("## 가");
+    assert.equal(await satAdd.inputValue(), "## 가", "No shortcut without the kind column.");
+    await satAdd.press("Enter");
+    await rowOf(satCell, "## 가").waitFor();
+    assert.equal(schedulePosts.length, postCount + 1);
+    assert.equal(lastPost().title, "## 가");
+    assert.ok(!("kind" in lastPost()) && !("sort_order" in lastPost()), `D8 body without block keys: ${Object.keys(lastPost()).join(",")}`);
+    await rowOf(sunCell, "일 첫 줄").getByRole("button", { name: "일 첫 줄", exact: true }).click();
+    await rowEdit.press("Enter");
+    await rowEdit.waitFor({ state: "hidden" });
+    assert.equal(await sunInsert.count(), 0, "No in-between draft without the kind column.");
     assert.deepEqual(errors, []);
-    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height (all on the fallback editor); D7 memo items fold/author/add without author fields/esc/edit conflict/delete undo/peer refresh; D8 week toggle/remembered view/done fold/quick add/toggle/rename conflict/delete undo/week nav/peer refresh/phone stack; D9 block rows off the month grid/count, week board in sort_order.");
+    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height (all on the fallback editor); D7 memo items fold/author/add without author fields/esc/edit conflict/delete undo/peer refresh; D8 week toggle/remembered view/done fold/quick add/toggle/rename conflict/delete undo/week nav/peer refresh/phone stack; D9 block rows off the month grid/count, week board in sort_order; D10 block kinds/shortcuts (add and edit)/sticky list kinds/number labels/blocks off the month view/insert between lines/PGRST204 retry/no-column fallback.");
   } finally {
     await browser.close();
   }

@@ -27,7 +27,7 @@ import {
   shouldRefreshSchedules,
   splitMonthItems,
 } from "@/lib/schedule-view";
-import { STICKY_COLORS, type Schedule, type StickyColor } from "@/lib/types";
+import { STICKY_COLORS, type Schedule, type ScheduleKind, type StickyColor } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { isTodo, orderDay } from "@/lib/week-blocks";
 import { groupWeek, shiftWeek, weekDays, weekLabel, weekStart } from "@/lib/week-view";
@@ -169,6 +169,29 @@ export function ScheduleCalendar({
     };
   }, [reload]);
 
+  // D10 block lines need schedules.kind (schema-schedule-blocks.sql). Rows tell us; an empty
+  // project asks the DB once. A write rejected for the column turns blocks off for the session.
+  const [kindProbe, setKindProbe] = useState<boolean | null>(null);
+  const [kindMissing, setKindMissing] = useState(false);
+  const blocksReady =
+    !kindMissing &&
+    (schedules.length > 0 ? schedules.some((s) => s.kind !== undefined) : kindProbe === true);
+  useEffect(() => {
+    if (loading || schedules.length > 0 || kindProbe !== null) return;
+    let alive = true;
+    api
+      .hasScheduleKind()
+      .then((ok) => {
+        if (alive) setKindProbe(ok);
+      })
+      .catch(() => {
+        if (alive) setKindProbe(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [loading, schedules.length, kindProbe]);
+
   const cells = useMemo(() => buildMonthCells(month), [month]);
 
   // The month grid, count and list show to-dos only; week-board blocks (text, headings) stay on the board.
@@ -218,32 +241,50 @@ export function ScheduleCalendar({
     }
   }
 
-  // Week board quick add: title and date only; detail fields stay empty.
-  async function addQuick(day: string, title: string): Promise<boolean> {
+  // Week board quick add: title and date only; detail fields stay empty. Block kind and
+  // sort_order go in only when the column exists; a rejection for it retries as a plain to-do.
+  async function addQuick(
+    day: string,
+    title: string,
+    block?: { kind: ScheduleKind; sort_order: number },
+  ): Promise<Schedule | null> {
     mutating.current++;
     try {
-      const created = await api.createSchedule(projectId, {
-        title,
-        due_date: day,
-        assignee: null,
-        note: null,
-        color: "yellow",
-      });
+      const base = { title, due_date: day, assignee: null, note: null, color: "yellow" as const };
+      const withBlock = blocksReady && block ? { ...base, ...block } : null;
+      let created: Schedule;
+      try {
+        created = await api.createSchedule(projectId, withBlock ?? base);
+      } catch (error) {
+        if (!withBlock || !(error instanceof api.ScheduleColumnMissingError)) throw error;
+        setKindMissing(true);
+        created = await api.createSchedule(projectId, base);
+      }
       setSchedules((prev) => [...prev.filter((s) => s.id !== created.id), created]);
-      return true;
+      return created;
     } catch (error) {
       toast.error(errorMessage(error, "추가하지 못했습니다."));
-      return false;
+      return null;
     } finally {
       mutating.current--;
     }
   }
 
   // Week board inline rename with the D6 edit lock. Resolves true when the edit can close.
-  async function rename(item: Schedule, title: string): Promise<boolean> {
+  // A kind change to a non-to-do also clears done (blocks have no checkbox).
+  async function rename(item: Schedule, title: string, kind?: ScheduleKind): Promise<boolean> {
     mutating.current++;
     try {
-      const updated = await api.updateSchedule(item.id, { title }, item.updated_at);
+      const withKind =
+        blocksReady && kind ? { title, kind, ...(kind === "todo" ? {} : { done: false }) } : null;
+      let updated: Schedule;
+      try {
+        updated = await api.updateSchedule(item.id, withKind ?? { title }, item.updated_at);
+      } catch (error) {
+        if (!withKind || !(error instanceof api.ScheduleColumnMissingError)) throw error;
+        setKindMissing(true);
+        updated = await api.updateSchedule(item.id, { title }, item.updated_at);
+      }
       setSchedules((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
       return true;
     } catch (error) {
@@ -546,6 +587,7 @@ export function ScheduleCalendar({
           byDate={weekByDate}
           todayKey={todayKey}
           showDone={showDone}
+          blocksReady={blocksReady}
           onToggleShowDone={() => setShowDone((prev) => !prev)}
           onAdd={addQuick}
           onToggle={toggleDone}

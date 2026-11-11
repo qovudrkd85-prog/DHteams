@@ -77,6 +77,12 @@ for (const [key, value] of [["title", "u"], ["due_date", "2026-11-12"], ["assign
 // updated_at is the edit lock token: a newer token must replace the stale row.
 assert.equal(sv.sameSchedules([row("a", { updated_at: "1" })], [row("a", { updated_at: "2" })]), false, "updated_at change must count.");
 assert.equal(sv.sameSchedules([row("a")], [row("a")]), true, "Rows without updated_at still compare equal.");
+// D10: kind and sort_order change how the week board draws a row, so they count too
+// (also when the column disappears, e.g. a rolled-back DB).
+assert.equal(sv.sameSchedules([row("a", { kind: "todo" })], [row("a", { kind: "h1" })]), false, "kind change must count.");
+assert.equal(sv.sameSchedules([row("a", { kind: "h1" })], [row("a")]), false, "A dropped kind column must count.");
+assert.equal(sv.sameSchedules([row("a", { sort_order: 1 })], [row("a", { sort_order: 2 })]), false, "sort_order change must count.");
+assert.equal(sv.sameSchedules([row("a", { kind: "h2", sort_order: 1 })], [row("a", { kind: "h2", sort_order: 1 })]), true);
 
 // shouldRefreshMemo: visible page, nothing waiting to save, calm status, textarea not focused.
 const calm = { visible: true, pending: false, status: "idle", focused: false };

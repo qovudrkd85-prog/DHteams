@@ -239,12 +239,46 @@ export type ScheduleInput = Pick<
 > &
   Partial<Pick<Schedule, "kind" | "sort_order">>;
 
+/** PostgREST / Postgres codes for a column the DB does not have yet (department-events.ts). */
+const MISSING_COLUMN_CODES = ["PGRST204", "42703"];
+
+/** The DB rejected a schedules column it does not have (e.g. kind before schema-schedule-blocks.sql). */
+export class ScheduleColumnMissingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ScheduleColumnMissingError";
+  }
+}
+
+function unwrapSchedule<T>(result: {
+  data: T | null;
+  error: { message: string; code?: string } | null;
+}): T {
+  if (result.error && MISSING_COLUMN_CODES.includes(result.error.code ?? "")) {
+    throw new ScheduleColumnMissingError(result.error.message);
+  }
+  return unwrap(result);
+}
+
+// Whether schedules.kind exists; remembered for the session once the DB answered.
+let scheduleKindColumn: boolean | null = null;
+
+/** Probe for schedules.kind (used when a project has no rows to look at). Any failure reads as "no". */
+export async function hasScheduleKind(): Promise<boolean> {
+  if (scheduleKindColumn !== null) return scheduleKindColumn;
+  const supabase = createClient();
+  const { error } = await supabase.from("schedules").select("kind").limit(1);
+  if (!error) scheduleKindColumn = true;
+  else if (MISSING_COLUMN_CODES.includes(error.code ?? "")) scheduleKindColumn = false;
+  return scheduleKindColumn === true;
+}
+
 export async function createSchedule(
   projectId: string,
   input: Omit<ScheduleInput, "done"> & { done?: boolean },
 ): Promise<Schedule> {
   const supabase = createClient();
-  return unwrap(
+  return unwrapSchedule(
     await supabase
       .from("schedules")
       .insert({ ...input, project_id: projectId })
@@ -273,9 +307,11 @@ export async function updateSchedule(
 ): Promise<Schedule> {
   const supabase = createClient();
   if (!expectedUpdatedAt) {
-    return unwrap(await supabase.from("schedules").update(patch).eq("id", id).select().single());
+    return unwrapSchedule(
+      await supabase.from("schedules").update(patch).eq("id", id).select().single(),
+    );
   }
-  const row = unwrap<Schedule | null>(
+  const row = unwrapSchedule<Schedule | null>(
     await supabase
       .from("schedules")
       .update(patch)
