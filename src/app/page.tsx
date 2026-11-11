@@ -246,6 +246,12 @@ export default function HomePage() {
             className="min-w-0 space-y-4 lg:sticky lg:top-20"
             aria-label="과업 목록과 팀 방"
           >
+            {view === "garage" && (
+              <>
+                <TeamPanel workspace={workspace} compact />
+                {!healing && <HealingCard focusOnMount={healingEnded} onOpen={() => { setHealing(true); setHealingEnded(false); }} />}
+              </>
+            )}
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" data-testid="project-list">
               <div className="border-b border-slate-100 p-5">
                 <div className="mb-1 flex items-center gap-2">
@@ -349,7 +355,6 @@ export default function HomePage() {
                 <TeamPanel workspace={workspace} />
               </>
             )}
-            {view === "garage" && !healing && <HealingCard focusOnMount={healingEnded} onOpen={() => { setHealing(true); setHealingEnded(false); }} />}
             <div className="rounded-2xl bg-teal-800 p-5 text-white">
               <p className="text-sm font-semibold">
                 일정은 함께, 기록은 차곡차곡.
