@@ -76,6 +76,8 @@ async function migrationSuite() {
     ]);
     await db.exec(readSql("schema-team-memberships"));
     assert.equal((await one("select count(*)::int as n from team_memberships")).n, 3, "re-run keeps rows");
+    // Joining order of migrated rows follows profile age, so owner handover picks the longest-standing member.
+    assert.equal((await one("select count(*)::int as n from team_memberships s join team_members m on m.id = s.member_id where s.joined_at <> m.created_at")).n, 0);
 
     // Re-running the single-team SQL afterwards would undo the multi-team rules: refuse.
     await assert.rejects(db.exec(readSql("schema-teams")), (error) => error.code === "P0001");
@@ -299,6 +301,9 @@ async function attendanceSuite() {
     const [inB] = await checkIn(members.alice.id);
     assert.equal(inB.team_id, teamB.id);
     assert.deepEqual((await rows("select id from team_attendance")).map((r) => r.id), [inB.id]);
+    // The app re-reads "today" by member and date only (workspace.ts checkIn): RLS leaves the active team's row alone.
+    const today = (await one("select work_date::text as d from team_attendance where id = $1", [inB.id])).d;
+    assert.deepEqual((await rows("select id from team_attendance where member_id = $1 and work_date = $2", [members.alice.id, today])).map((r) => r.id), [inB.id]);
     await one("update team_attendance set checked_out_at = now() where id = $1 returning id", [inB.id]);
     assert.equal((await db.query("update team_attendance set checked_out_at = now() where id = $1", [inA.id])).affectedRows, 0);
     await rejects("update team_attendance set team_id = $2 where id = $1", [inB.id, teamA.id]);
@@ -307,6 +312,9 @@ async function attendanceSuite() {
     assert.deepEqual(visibleA.map((r) => [r.id, r.checked_out_at]), [[inA.id, null]]);
     await admin();
     assert.equal((await one("select count(*)::int as n from team_attendance where member_id = $1", [members.alice.id])).n, 2);
+    // Rows without a team (service writes) still allow one per person and day.
+    await db.query("insert into team_attendance(member_id) values ($1)", [members.bob.id]);
+    await rejects("insert into team_attendance(member_id) values ($1)", [members.bob.id], "23505");
   } finally {
     await db.close();
   }
@@ -314,7 +322,7 @@ async function attendanceSuite() {
 
 // M5: a screen still showing another team (x-teams-team header) cannot read or write the active team.
 async function expectedTeamSuite() {
-  const { db, one, rows, rejects, session, members } = await openDb();
+  const { db, one, rows, rejects, session, admin, members } = await openDb();
   const headers = (value) => db.query("select set_config('request.headers', $1, false)", [value]);
   try {
     await db.exec(readSql("schema-team-memberships"));
@@ -341,6 +349,26 @@ async function expectedTeamSuite() {
     await headers("");
     assert.equal((await one("select public.current_team_id() as id")).id, teamA.id);
     await one("insert into projects(name,owner_id) values ('A 둘째',$1) returning id", [ids.alice]);
+    // Leave and code rotation from a stale screen hit the wrong team: refused, nothing changes.
+    await headers(JSON.stringify({ "x-teams-team": teamB.id }));
+    await rejects("select public.leave_team()");
+    await rejects("select * from regenerate_team_code()");
+    await headers(JSON.stringify({ "x-teams-team": teamA.id }));
+    const rotated = await one("select * from regenerate_team_code()");
+    assert.notEqual(rotated.invite_code, teamA.invite_code);
+    await headers("");
+    await admin();
+    assert.equal((await one("select count(*)::int as n from team_memberships where member_id = $1", [members.alice.id])).n, 2);
+    // A mate looking at another team: no position at all, even outside any room (layout_id null).
+    await session(ids.bob);
+    await one("select * from join_team($1)", [rotated.invite_code]);
+    await one("select * from join_team($1)", [teamB.invite_code]);
+    await one("insert into team_presence(member_id,layout_id,x,y) values ($1,null,0,0) returning member_id", [members.bob.id]);
+    await session(ids.alice);
+    assert.deepEqual((await rows("select username from team_members order by username")).map((r) => r.username), ["alice", "bob"]);
+    assert.equal((await rows("select * from team_presence where member_id = $1", [members.bob.id])).length, 0);
+    await session(ids.bob);
+    assert.equal((await rows("select * from team_presence where member_id = $1", [members.bob.id])).length, 1);
   } finally {
     await db.close();
   }

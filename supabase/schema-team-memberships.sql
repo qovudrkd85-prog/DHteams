@@ -9,6 +9,9 @@ begin
   if to_regclass('public.teams') is null then
     raise exception '팀 공간(schema-teams.sql)을 먼저 설치해 주세요.' using errcode = 'P0001';
   end if;
+  if current_setting('server_version_num')::int < 150000 then
+    raise exception 'PostgreSQL 15 이상이 필요합니다.' using errcode = 'P0001';
+  end if;
 end;
 $$;
 
@@ -23,8 +26,9 @@ create table if not exists public.team_memberships (
 create index if not exists team_memberships_team_idx on public.team_memberships (team_id, joined_at);
 
 -- 기존 소속 이전(재실행 안전). 팀을 만든 사람만 owner 입니다.
-insert into public.team_memberships (member_id, team_id, role)
-select member.id, member.team_id, case when team.created_by = member.id then 'owner' else 'member' end
+-- joined_at = 프로필 생성 시각: 팀장 승계("가장 오래된 팀원")가 임의 순서가 되지 않게 합니다.
+insert into public.team_memberships (member_id, team_id, role, joined_at)
+select member.id, member.team_id, case when team.created_by = member.id then 'owner' else 'member' end, member.created_at
 from public.team_members as member
 join public.teams as team on team.id = member.team_id
 where member.team_id is not null
@@ -47,7 +51,7 @@ do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'team_attendance_member_team_date_key') then
     alter table public.team_attendance add constraint team_attendance_member_team_date_key
-      unique (member_id, team_id, work_date);
+      unique nulls not distinct (member_id, team_id, work_date);
   end if;
 end;
 $$;
@@ -110,11 +114,34 @@ create policy memberships_read on public.team_memberships for select to authenti
   using (member_id = (select public.current_team_member_id())
     or team_id = (select public.current_team_id()));
 
--- 다른 팀 방에 있는 동료의 위치는 보이지 않습니다.
+-- 위치는 같은 팀을 지금 보고 있는 동료끼리만 보입니다(방 밖 layout_id null 포함).
+create or replace function public.is_viewing_my_team(p_member uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.team_members as member
+    where member.id = p_member and member.team_id = public.current_team_id()
+  );
+$$;
+revoke all on function public.is_viewing_my_team(uuid) from public, anon, authenticated;
+grant execute on function public.is_viewing_my_team(uuid) to authenticated, service_role;
+
 drop policy if exists presence_members_read on public.team_presence;
 create policy presence_members_read on public.team_presence for select to authenticated
-  using (public.is_team_mate(member_id)
+  using (public.is_viewing_my_team(member_id)
     and (layout_id is null or public.layout_in_my_team(layout_id)));
+
+-- 화면이 보내는 팀(x-teams-team)이 지금 보는 팀과 다르면 거절: 다른 기기에서 바꾼 뒤 옛 화면의 나가기·코드 재발급 방지.
+create or replace function public.check_screen_team(p_active uuid)
+returns void language plpgsql stable security definer set search_path = '' as $$
+declare
+  screen text := nullif(current_setting('request.headers', true), '')::json ->> 'x-teams-team';
+begin
+  if screen is not null and screen is distinct from p_active::text then
+    raise exception '다른 기기에서 팀을 바꿨습니다. 새로고침한 뒤 다시 시도해 주세요.' using errcode = '42501';
+  end if;
+end;
+$$;
+revoke all on function public.check_screen_team(uuid) from public, anon, authenticated;
 
 -- RPC 공통: 소속 추가 후 그 팀으로 이동. 옮기기 전 내 위치(캐릭터)는 지웁니다. 책상은 팀마다 남습니다.
 create or replace function public.move_to_team(p_member uuid, p_team uuid)
@@ -180,7 +207,7 @@ begin
   if normalized !~ '^[A-HJKMNP-Z2-9]{8}$' then
     raise exception '초대코드 8자리를 확인해 주세요.' using errcode = '22023';
   end if;
-  select * into target from public.teams where invite_code = normalized for update;
+  select * into target from public.teams where invite_code = normalized for no key update;
   if not found then
     raise exception '초대코드에 맞는 팀이 없습니다.' using errcode = 'P0002';
   end if;
@@ -232,7 +259,8 @@ begin
   if leaving is null then
     raise exception '소속된 팀이 없습니다.' using errcode = 'P0002';
   end if;
-  perform 1 from public.teams where id = leaving for update;
+  perform public.check_screen_team(leaving);
+  perform 1 from public.teams where id = leaving for no key update;
   for layout in
     select id, items from public.office_layouts
     where team_id = leaving
@@ -279,7 +307,8 @@ begin
   if actor.team_id is null then
     raise exception '소속된 팀이 없습니다.' using errcode = 'P0002';
   end if;
-  select * into target from public.teams where id = actor.team_id for update;
+  perform public.check_screen_team(actor.team_id);
+  select * into target from public.teams where id = actor.team_id for no key update;
   if not exists (
     select 1 from public.team_memberships where member_id = actor.id and team_id = target.id and role = 'owner'
   ) and exists (

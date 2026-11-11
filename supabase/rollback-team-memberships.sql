@@ -27,6 +27,7 @@ alter table public.team_members drop constraint if exists team_members_active_te
 drop function if exists public.switch_team(uuid);
 drop function if exists public.move_to_team(uuid, uuid);
 drop function if exists public.check_team_limit(uuid);
+drop function if exists public.check_screen_team(uuid);
 
 -- 3) 출퇴근: 사람·날짜당 1줄로 복원
 alter table public.team_attendance drop constraint if exists team_attendance_member_team_date_key;
@@ -191,6 +192,7 @@ grant execute on function public.regenerate_team_code() to authenticated;
 -- 5) 소속 표 보관: 정책·도우미 제거 후 이름 변경
 drop policy if exists memberships_read on public.team_memberships;
 drop function if exists public.my_team_ids();
+drop function if exists public.is_viewing_my_team(uuid);
 alter table public.team_memberships rename to team_memberships_rolled_back;
 alter index if exists public.team_memberships_pkey rename to team_memberships_rolled_back_pkey;
 alter index if exists public.team_memberships_team_idx rename to team_memberships_rolled_back_team_idx;
