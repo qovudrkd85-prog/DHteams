@@ -28,7 +28,6 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     // Same month as today so the team calendar shows it without paging; D-0..3.
     const soonDay = Math.min(td + 3, new Date(Date.UTC(ty, tm, 0)).getUTCDate());
     const soon = new Date(Date.UTC(ty, tm - 1, soonDay)).toISOString().slice(0, 10);
-    const soonLabel = soonDay === td ? "D-day" : `D-${soonDay - td}`;
     const pastKey = (n) => new Date(Date.UTC(ty, tm - 1, td - n)).toISOString().slice(0, 10);
     const members = [
       { id: "11111111-1111-4111-8111-111111111111", name: "김민수", role: "설계", avatar: "🐻", color: "#547867", created_at: today },
@@ -56,7 +55,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     const schedules = [
       { id: "s1", project_id: "p1", title: "중간보고서 제출", due_date: today, assignee: "김민수", note: null, color: "yellow", done: false, created_at: stamp(), deleted_at: null, projects: { name: "효곡지구 자연재해위험개선지구", code: null, deleted_at: null } },
       { id: "s4", project_id: "p3", title: "후포 현장조사", due_date: soon, assignee: null, note: null, color: "green", done: false, created_at: stamp(), deleted_at: null, projects: { name: "후포지구 풍수해생활권", code: "2026-03", deleted_at: null } },
-      // p2: an older finished deadline (no badge) and a newer open overdue one (D+1).
+      // p2: an older finished deadline and a newer open overdue one.
       { id: "s5", project_id: "p2", title: "지평 끝난 일정", due_date: pastKey(2), assignee: null, note: null, color: "blue", done: true, created_at: stamp(), deleted_at: null, projects: { name: "지평지구", code: "2026-02", deleted_at: null } },
       { id: "s6", project_id: "p2", title: "지평 밀린 보고", due_date: pastKey(1), assignee: null, note: null, color: "blue", done: false, created_at: stamp(), deleted_at: null, projects: { name: "지평지구", code: "2026-02", deleted_at: null } },
       { id: "s3", project_id: "p1", title: "지워진 일정", due_date: today, assignee: null, note: null, color: "blue", done: false, created_at: stamp(), deleted_at: today, projects: { name: "효곡지구 자연재해위험개선지구", code: null, deleted_at: null } },
@@ -192,15 +191,10 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await page.getByTestId("team-room").waitFor();
     assert.ok(await topOf("project-list") < await topOf("team-room"), "The project list must sit above the team room.");
     assert.ok(await page.getByTestId("project-list").locator(".overflow-y-auto").evaluate((box) => parseFloat(getComputedStyle(box).maxHeight)) <= 360, "The project list box stays about 360px tall.");
-    // Each project in the list shows its nearest open deadline as D-n.
-    const upcomingOf = (id) => page.locator(`aside a[href="/projects/${id}?view=schedule"] [data-testid="project-upcoming"]`);
-    await upcomingOf("p1").waitFor();
-    assert.equal(await upcomingOf("p1").textContent(), "D-day중간보고서 제출");
-    assert.equal(await upcomingOf("p3").textContent(), `${soonLabel}후포 현장조사`);
-    // Open overdue deadlines win as D+n; finished ones never badge.
-    assert.equal(await upcomingOf("p2").textContent(), "D+1지평 밀린 보고");
-    assert.equal(await upcomingOf("p2").getAttribute("data-overdue"), "true");
-    assert.equal(await upcomingOf("p1").getAttribute("data-overdue"), null);
+    // The project list shows no D-n badge (deadlines live in the legend and month list).
+    await page.locator('aside a[href="/projects/p1?view=schedule"]').waitFor();
+    assert.equal(await page.locator('[data-testid="project-upcoming"]').count(), 0, "The project list has no D-n badge.");
+    assert.equal(await page.getByTestId("project-list").getByText("다가오는 일정을 불러오지").count(), 0);
     await page.getByLabel("과업 검색").fill("후포");
     assert.equal(await page.locator("aside a").count(), 1);
     assert.equal(

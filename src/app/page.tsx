@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ArrowUpRight, FolderOpen, Search, Sprout } from "lucide-react";
 
@@ -14,7 +14,7 @@ import { TeamPanel } from "@/components/team/panel";
 import { Garage } from "@/components/team/garage";
 import { HealingPlace } from "@/components/team/healing/healing-place";
 import { TeamRoomMini } from "@/components/team/team-room";
-import { ProjectFocusListener, UpcomingBadge, useFocusTarget, useUpcomingDeadlines } from "@/components/team/project-deadline-filter";
+import { ProjectFocusListener, useFocusTarget } from "@/components/team/project-deadline-filter";
 import { TrashDialog } from "@/components/trash-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,7 +33,6 @@ import { createProject, listProjects } from "@/lib/queries";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import type { Project } from "@/lib/types";
 import { useTeamWorkspace } from "@/lib/team/use-team-workspace";
-import { projectToneMap, toneFor } from "@/lib/project-deadlines";
 
 export default function HomePage() {
   const router = useRouter();
@@ -59,9 +58,6 @@ export default function HomePage() {
   );
   // Project the team calendar was asked to open on (from a project's "팀 달력에서 보기").
   const [focusProject, setFocusProject] = useState<string | null>(null);
-  const upcoming = useUpcomingDeadlines(loading ? null : projects);
-  // Same colours as the team calendar (both built from this team's project list).
-  const toneMap = useMemo(() => projectToneMap(projects.map((p) => p.id)), [projects]);
   const focus = useFocusTarget(focusProject, projects, loading);
   const visibleProjects = projects.filter((project) =>
     `${project.name} ${project.code ?? ""}`
@@ -257,11 +253,6 @@ export default function HomePage() {
                 <p className="mb-4 text-xs text-slate-500">
                   과업을 선택해 과업 달력과 파일 이력을 확인하세요.
                 </p>
-                {upcoming.error && (
-                  <p role="status" className="-mt-2 mb-3 text-xs text-amber-700">
-                    다가오는 일정을 불러오지 못했습니다 ({upcoming.error}).
-                  </p>
-                )}
                 <div className="relative">
                   <Search className="absolute top-2.5 left-3 size-4 text-slate-400" />
                   <Input
@@ -315,7 +306,6 @@ export default function HomePage() {
                             {project.code}
                           </p>
                         )}
-                        <UpcomingBadge item={upcoming.next.get(project.id)} tone={toneFor(toneMap, project.id)} />
                         {project.description && (
                           <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
                             {project.description}

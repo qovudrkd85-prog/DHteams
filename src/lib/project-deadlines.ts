@@ -162,35 +162,3 @@ export function daysUntil(due: string, today: string): number {
 export function dDayLabel(days: number): string {
   return days === 0 ? "D-day" : days > 0 ? `D-${days}` : `D+${-days}`;
 }
-
-/** The nearest open deadline of each project on or after `today` (input must be sorted by due date). */
-export function nextDeadlineByProject(
-  deadlines: readonly ProjectDeadline[],
-  today: string,
-): Map<string, { deadline: ProjectDeadline; days: number }> {
-  const next = new Map<string, { deadline: ProjectDeadline; days: number }>();
-  for (const deadline of deadlines) {
-    if (deadline.done || deadline.due_date < today || next.has(deadline.project_id)) continue;
-    next.set(deadline.project_id, { deadline, days: daysUntil(deadline.due_date, today) });
-  }
-  return next;
-}
-
-/**
- * Badge per project: the oldest open overdue deadline wins (days < 0, shown as D+n);
- * otherwise the nearest open deadline on or after `today`. Input must be sorted by due date.
- */
-export function badgeDeadlineByProject(
-  deadlines: readonly ProjectDeadline[],
-  today: string,
-): Map<string, { deadline: ProjectDeadline; days: number }> {
-  const badge = new Map<string, { deadline: ProjectDeadline; days: number }>();
-  for (const deadline of deadlines) {
-    if (deadline.done || deadline.due_date >= today || badge.has(deadline.project_id)) continue;
-    badge.set(deadline.project_id, { deadline, days: daysUntil(deadline.due_date, today) });
-  }
-  for (const [projectId, item] of nextDeadlineByProject(deadlines, today)) {
-    if (!badge.has(projectId)) badge.set(projectId, item);
-  }
-  return badge;
-}
