@@ -19,6 +19,8 @@ const setupSql = `
 const schemas = ["schema", "schema-open-mode", "schema-update-all", "schema-trash", "schema-department-events", "schema-team-workspace", "schema-accounts", "schema-office-presence"];
 // --memberships: same checks with schema-team-memberships.sql installed (several teams per person).
 const membershipsMode = process.argv.includes("--memberships");
+// --rollback: install memberships, roll back, run the one-team checks, then install again.
+const rollbackMode = process.argv.includes("--rollback");
 const event = (title, visibility) => ({ title, visibility, starts_on: "2026-11-10", ends_on: "2026-11-10" });
 
 (async () => {
@@ -47,6 +49,16 @@ const event = (title, visibility) => ({ title, visibility, starts_on: "2026-11-1
     if (membershipsMode) {
       await db.exec(readSql("schema-team-memberships"));
       await db.exec(readSql("schema-team-memberships"));
+    }
+    if (rollbackMode) {
+      await db.exec(readSql("schema-team-memberships"));
+      await db.exec(readSql("rollback-team-memberships"));
+      assert.equal((await one("select to_regclass('public.team_memberships') as t")).t, null);
+      // A second rollback has nothing to undo.
+      await assert.rejects(db.exec(readSql("rollback-team-memberships")), (error) => error.code === "P0001");
+      await db.exec("rollback");
+      // One-team SQL may run again after the rollback.
+      await db.exec(readSql("schema-teams"));
     }
     // Older SQL re-run after teams would reopen access: it must refuse and roll back.
     for (const stale of ["schema-accounts", "schema-office-presence", ...(membershipsMode ? ["schema-teams"] : [])]) {
@@ -208,11 +220,22 @@ const event = (title, visibility) => ({ title, visibility, starts_on: "2026-11-1
     assert.equal((await rows("select * from projects")).length, 1);
 
     await db.exec("reset role");
+    if (rollbackMode) {
+      // Install again after one-team use: memberships rebuilt from each person's current team only.
+      await db.exec(readSql("schema-team-memberships"));
+      const withTeam = (await one("select count(*)::int as n from team_members where team_id is not null")).n;
+      assert.equal((await one("select count(*)::int as n from team_memberships")).n, withTeam);
+      assert.equal((await one("select count(*)::int as n from team_members m where m.team_id is not null and not exists (select 1 from team_memberships s where s.member_id = m.id and s.team_id = m.team_id)")).n, 0);
+      await session(bobId);
+      await one("select * from create_team('되돌림 뒤 두 번째')");
+      assert.equal((await rows("select * from teams")).length, 2);
+      await db.exec("reset role");
+    }
     const codes = new Set();
     for (let i = 0; i < 300; i += 1) codes.add((await one("select public.generate_team_invite_code() as c")).c);
     assert.ok(codes.size >= 299);
     for (const code of codes) assert.match(code, /^[A-HJKMNP-Z2-9]{8}$/);
-    console.log(`PASS${membershipsMode ? " (memberships)" : ""}: team create/join/leave, invite code rules, cross-team isolation for projects/nodes/seats/presence/members, team vs private schedules, creator-only code rotation, repeatable SQL.`);
+    console.log(`PASS${membershipsMode ? " (memberships)" : rollbackMode ? " (install, rollback, one-team checks, reinstall)" : ""}: team create/join/leave, invite code rules, cross-team isolation for projects/nodes/seats/presence/members, team vs private schedules, creator-only code rotation, repeatable SQL.`);
   } finally {
     await db.close();
   }

@@ -19,6 +19,20 @@ Supabase SQL Editor에서 다음 순서로 전체 파일을 실행합니다. 기
 
 **최신 설치 후 `schema-open-mode.sql`이나 이전 공유 정책 SQL만 다시 실행하지 마세요.** 이전 정책이 다시 열릴 수 있습니다. 복구·재적용은 전체 통합 파일을 사용해 `schema-accounts.sql` 다음에 반드시 `schema-office-presence.sql`까지 완료합니다. 계정 SQL만 마지막으로 실행하면 상태 메시지 변경 권한이 사라질 수 있습니다.
 
+## 한 사람이 여러 팀에 소속 (schema-team-memberships.sql)
+
+`schema-teams.sql` 이 설치된 DB에 추가합니다. 소속은 `team_memberships`(여러 줄), `team_members.team_id` 는 "지금 보는 팀"입니다(폰·PC 공유). 출퇴근은 팀별 1줄입니다. PostgreSQL 15 이상이 필요합니다.
+
+1. 백업: SQL Editor에서 `select id, team_id from team_members` 와 `select * from teams` 를 CSV로 내려받습니다. `select count(*) from team_members where team_id is not null` 값을 적어 둡니다.
+2. `npm run db:prepare` → `artifacts/setup/teams-memberships-upgrade.sql` 전체를 SQL Editor에서 실행합니다(한 트랜잭션).
+3. 확인: `select count(*) from team_memberships` 가 1번 값과 같고, 아래가 0 이어야 합니다.
+   `select count(*) from team_members m where m.team_id is not null and not exists (select 1 from team_memberships s where s.member_id = m.id and s.team_id = m.team_id);`
+4. 곧바로 새 앱을 배포합니다. 1~4 사이에는 옛 앱의 출근 버튼이 오류를 냅니다(출퇴근 고유키가 바뀜). 나머지 기능은 옛 앱에서도 동작합니다.
+
+되돌리기(승인 필요): `artifacts/setup/teams-memberships-rollback.sql` 실행 → 곧바로 이전 앱 배포. 각자 지금 보던 팀이 그 사람의 팀이 되고, 두 번째 이후 소속은 화면에서 사라집니다(소속 표는 `team_memberships_rolled_back` 으로 보관). 같은 날 두 팀에 출근한 기록이 있으면 실행이 멈춥니다.
+
+설치 뒤에는 `schema-teams.sql` 만 다시 실행하지 마세요. 팀 규칙이 옛날로 돌아가므로 파일이 스스로 멈춥니다.
+
 ## 새 공유 공간 설치 순서
 
 1. `schema.sql`: 과업·폴더·파일·이력과 초기 권한 구조.
@@ -48,6 +62,11 @@ SQL Editor에서 각 단계의 성공을 확인한 후 다음 단계를 실행�
 | `schema-team-workspace.sql` | 사무실과 팀원 출퇴근 |
 | `schema-accounts.sql` | 개인 계정과 본인 권한, 익명 접근 차단 |
 | `schema-office-presence.sql` | 본인 자리·상태 메시지·6개 공간·캐릭터 위치 |
+| `schema-teams.sql` | 팀 공간(초대코드)·개인 일정 |
+| `schema-team-memberships.sql` | 한 사람 여러 팀 소속·팀 바꾸기·팀별 출퇴근 |
+| `rollback-team-memberships.sql` | 위 파일 되돌리기(승인 필요) |
+| `schema-personal-library.sql` | 개인 메모·PC 폴더·파일 목록·파일 메모(사람 소유, 팀 무관) |
+| `rollback-personal-library.sql` | 위 파일 되돌리기(자료 삭제, 승인 필요) |
 
 이전 단독 업데이트 파일은 기존 설치 이력을 확인할 수 있도록 보존합니다. `schema-update-all.sql`은 위의 기본 부가기능 묶음이며 새 사무실 SQL까지 포함하는 파일은 아닙니다.
 

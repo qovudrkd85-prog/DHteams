@@ -4,7 +4,9 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const sources = ["schema-team-workspace.sql", "schema-accounts.sql", "schema-office-presence.sql"];
 const teamSources = ["schema-teams.sql"];
-const content = new Map([...sources, ...teamSources].map((name) => {
+const membershipSources = ["schema-team-memberships.sql"];
+const rollbackSources = ["rollback-team-memberships.sql"];
+const content = new Map([...sources, ...teamSources, ...membershipSources, ...rollbackSources].map((name) => {
   const sql = fs.readFileSync(path.join(root, "supabase", name), "utf8");
   if ((sql.match(/^begin;\s*$/gm) || []).length !== 1 || (sql.match(/^commit;\s*$/gm) || []).length !== 1) {
     throw new Error(`Expected one outer transaction in ${name}. Review before generating.`);
@@ -31,6 +33,18 @@ const bundles = [
     description: "team spaces (invite codes) + private schedules upgrade",
     prerequisite: "Office presence must already be installed. Re-run this LAST after any other DH Teams SQL.",
     sources: teamSources,
+  },
+  {
+    name: "teams-memberships-upgrade.sql",
+    description: "several teams per person (memberships, team switch, attendance per team)",
+    prerequisite: "schema-teams.sql must already be installed. Needs PostgreSQL 15+. Apply BEFORE deploying the app that has the team switcher.",
+    sources: membershipSources,
+  },
+  {
+    name: "teams-memberships-rollback.sql",
+    description: "ROLLBACK of several teams per person back to one team per person",
+    prerequisite: "Only with owner approval. Redeploy the previous app right after (attendance check-in key changes back).",
+    sources: rollbackSources,
   },
 ];
 for (const bundle of bundles) {
