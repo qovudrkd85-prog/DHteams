@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/client";
 import type { Schedule, StickyColor } from "@/lib/types";
+import { isTodo } from "@/lib/week-blocks";
 
 /**
  * A project schedule as the team calendar shows it: a deadline that links back to its project.
@@ -51,25 +52,45 @@ export async function listProjectDeadlines(
   last: string,
   options: { openOnly?: boolean; projectId?: string; limit?: number } = {},
 ): Promise<ProjectDeadline[]> {
-  let query = createClient()
-    .from("schedules")
-    .select("*, projects!inner(name, code, deleted_at)")
-    .gte("due_date", first)
-    .lte("due_date", last)
-    .is("deleted_at", null)
-    .is("projects.deleted_at", null);
-  // Done rows would only eat the row cap when the caller wants what is still to do.
-  if (options.openOnly) query = query.eq("done", false);
-  if (options.projectId) query = query.eq("project_id", options.projectId);
-  const ordered = query
-    .order("due_date", { ascending: true })
-    .order("created_at", { ascending: true });
-  const { data, error } = await (options.limit ? ordered.limit(options.limit) : ordered);
+  const fetchRows = (filterKind: boolean) => {
+    let query = createClient()
+      .from("schedules")
+      .select("*, projects!inner(name, code, deleted_at)")
+      .gte("due_date", first)
+      .lte("due_date", last)
+      .is("deleted_at", null)
+      .is("projects.deleted_at", null);
+    // Only to-do rows are deadlines; week-board text/heading rows stay on the board.
+    if (filterKind) query = query.eq("kind", "todo");
+    // Done rows would only eat the row cap when the caller wants what is still to do.
+    if (options.openOnly) query = query.eq("done", false);
+    if (options.projectId) query = query.eq("project_id", options.projectId);
+    const ordered = query
+      .order("due_date", { ascending: true })
+      .order("created_at", { ascending: true });
+    return options.limit ? ordered.limit(options.limit) : ordered;
+  };
+  const filterKind = kindColumn !== false;
+  let { data, error } = await fetchRows(filterKind);
+  if (error && filterKind && MISSING_COLUMN_CODES.includes(error.code ?? "")) {
+    // schema-schedule-blocks.sql not applied yet: remember it and read without the filter.
+    kindColumn = false;
+    ({ data, error } = await fetchRows(false));
+  } else if (!error && filterKind && kindColumn === null) {
+    kindColumn = true;
+  }
   if (error) throw new Error(error.message);
   return ((data ?? []) as ScheduleRow[])
     .filter((row) => row.projects !== null && !row.projects.deleted_at)
+    .filter(isTodo)
     .map(toDeadline);
 }
+
+/** PostgREST / Postgres codes for a column that does not exist (see department-events.ts). */
+const MISSING_COLUMN_CODES = ["PGRST204", "42703"];
+
+/** Whether schedules.kind exists: null until the first answer tells us. */
+let kindColumn: boolean | null = null;
 
 /**
  * The calendar's creator filter applied to deadlines. Schedules carry a free-text assignee, so

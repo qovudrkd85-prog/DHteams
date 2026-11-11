@@ -9,12 +9,42 @@ const source = fs.readFileSync(path.resolve(__dirname, "../src/lib/project-deadl
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 });
+// Fake Supabase client: records each query's filters and answers from `responses` in order.
+const calls = [];
+let responses = [];
+function fakeClient() {
+  return {
+    from(table) {
+      const call = { table, eq: [] };
+      calls.push(call);
+      const builder = {
+        select: () => builder,
+        gte: () => builder,
+        lte: () => builder,
+        is: () => builder,
+        order: () => builder,
+        limit: () => builder,
+        eq: (column, value) => { call.eq.push(`${column}=${value}`); return builder; },
+        then: (resolve, reject) => Promise.resolve(responses.shift() ?? { data: [], error: null }).then(resolve, reject),
+      };
+      return builder;
+    },
+  };
+}
+function loadWeekBlocks() {
+  const wbSource = fs.readFileSync(path.resolve(__dirname, "../src/lib/week-blocks.ts"), "utf8");
+  const box = { exports: {}, module: { exports: {} }, require: (name) => { throw new Error(`unexpected import ${name}`); } };
+  box.exports = box.module.exports;
+  vm.runInNewContext(ts.transpileModule(wbSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, box);
+  return box.module.exports;
+}
 const sandbox = {
   exports: {},
   module: { exports: {} },
   // The Supabase client is never called by the pure helpers under test.
   require: (name) => {
-    if (name === "@/lib/supabase/client") return { createClient: () => { throw new Error("no network in this test"); } };
+    if (name === "@/lib/supabase/client") return { createClient: () => fakeClient() };
+    if (name === "@/lib/week-blocks") return loadWeekBlocks();
     throw new Error(`unexpected import ${name}`);
   },
 };
@@ -90,4 +120,30 @@ assert.equal(sameProjects([row("a")], [row("a", { code: "C-1" })]), false);
 assert.equal(sameProjects([row("a")], [row("a", { description: "new" })]), false);
 assert.equal(sameProjects([], []), true);
 
-console.log("PASS: project tone map avoids clashes and is stable, deadline groups by project, same-list check.");
+// D9: deadlines ask for to-do rows only; without the kind column, refetch once unfiltered and filter here.
+(async () => {
+  const live = { name: "P", code: null, deleted_at: null };
+  const sched = (id, extra = {}) => ({ id, project_id: "p1", title: id, due_date: "2026-11-12", assignee: null, note: null, color: "yellow", done: false, created_at: "t", deleted_at: null, projects: live, ...extra });
+  responses = [
+    { data: null, error: { code: "42703", message: "column schedules.kind does not exist" } },
+    { data: [sched("todo-a"), sched("head", { kind: "h1" }), sched("todo-b", { kind: "todo" })], error: null },
+  ];
+  const first = await pd.listProjectDeadlines("2026-11-01", "2026-11-30");
+  assert.equal(calls.length, 2, "One refetch after a missing kind column.");
+  assert.ok(calls[0].eq.includes("kind=todo"), "The first query filters kind = todo.");
+  assert.ok(!calls[1].eq.includes("kind=todo"), "The refetch has no kind filter.");
+  assert.deepEqual(Array.from(first, (x) => x.id), ["todo-a", "todo-b"], "Block rows are dropped on the client.");
+  // The module remembers the column is missing: no more kind filter, no extra request.
+  responses = [{ data: [sched("todo-c"), sched("text", { kind: "text" })], error: null }];
+  const second = await pd.listProjectDeadlines("2026-11-01", "2026-11-30");
+  assert.equal(calls.length, 3);
+  assert.ok(!calls[2].eq.includes("kind=todo"));
+  assert.deepEqual(Array.from(second, (x) => x.id), ["todo-c"]);
+  // Other errors still throw.
+  responses = [{ data: null, error: { code: "500", message: "boom" } }];
+  await assert.rejects(pd.listProjectDeadlines("2026-11-01", "2026-11-30"), /boom/);
+  console.log("PASS: project tone map avoids clashes and is stable, deadline groups by project, same-list check, kind=todo filter with missing-column refetch.");
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

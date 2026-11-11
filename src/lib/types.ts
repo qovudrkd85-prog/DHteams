@@ -97,4 +97,10 @@ export interface Schedule {
   deleted_at?: string | null;
   /** Edit lock token; missing until schema-schedules-updated-at.sql is applied. */
   updated_at?: string;
+  /** Week-board line kind; missing (= todo) until schema-schedule-blocks.sql is applied. */
+  kind?: ScheduleKind;
+  /** Order within the day; missing (= 0) until schema-schedule-blocks.sql is applied. */
+  sort_order?: number;
 }
+
+export type ScheduleKind = "todo" | "text" | "h1" | "h2" | "h3" | "bullet" | "number";

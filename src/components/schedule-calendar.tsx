@@ -29,6 +29,7 @@ import {
 } from "@/lib/schedule-view";
 import { STICKY_COLORS, type Schedule, type StickyColor } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { isTodo, orderDay } from "@/lib/week-blocks";
 import { groupWeek, shiftWeek, weekDays, weekLabel, weekStart } from "@/lib/week-view";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
@@ -170,21 +171,24 @@ export function ScheduleCalendar({
 
   const cells = useMemo(() => buildMonthCells(month), [month]);
 
+  // The month grid, count and list show to-dos only; week-board blocks (text, headings) stay on the board.
+  const todoItems = useMemo(() => schedules.filter(isTodo), [schedules]);
+
   const byDate = useMemo(() => {
     const map = new Map<string, Schedule[]>();
-    schedules.forEach((s) => {
+    todoItems.forEach((s) => {
       const list = map.get(s.due_date) ?? [];
       map.set(s.due_date, [...list, s]);
     });
     return map;
-  }, [schedules]);
+  }, [todoItems]);
 
-  const todoCount = schedules.filter((s) => !s.done).length;
+  const todoCount = todoItems.filter((s) => !s.done).length;
 
   const monthKey = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`;
   const monthItems = useMemo(
-    () => schedules.filter((s) => s.due_date.startsWith(monthKey)),
-    [schedules, monthKey],
+    () => todoItems.filter((s) => s.due_date.startsWith(monthKey)),
+    [todoItems, monthKey],
   );
 
   // After a conflict: reload, then point the open dialog at the latest row (my input stays).
@@ -393,8 +397,12 @@ export function ScheduleCalendar({
     else setMonth(new Date());
   };
   const days = useMemo(() => weekDays(weekStartKey), [weekStartKey]);
+  // The week board shows every row of a day (blocks too), in sort_order.
   const weekByDate = useMemo(
-    () => groupWeek(schedules, weekStartKey),
+    () =>
+      new Map(
+        Array.from(groupWeek(schedules, weekStartKey), ([day, rows]) => [day, orderDay(rows)]),
+      ),
     [schedules, weekStartKey],
   );
   // In week mode the month notes follow the month of the week's Monday.

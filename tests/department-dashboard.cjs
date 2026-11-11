@@ -60,6 +60,8 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
       { id: "s6", project_id: "p2", title: "지평 밀린 보고", due_date: pastKey(1), assignee: null, note: null, color: "blue", done: false, created_at: stamp(), deleted_at: null, projects: { name: "지평지구", code: "2026-02", deleted_at: null } },
       { id: "s3", project_id: "p1", title: "지워진 일정", due_date: today, assignee: null, note: null, color: "blue", done: false, created_at: stamp(), deleted_at: today, projects: { name: "효곡지구 자연재해위험개선지구", code: null, deleted_at: null } },
       { id: "s7", project_id: "px", title: "다른 팀 마감", due_date: today, assignee: null, note: null, color: "pink", done: false, created_at: stamp(), deleted_at: null, projects: { name: "다른 팀 과업", code: "X-1", deleted_at: null } },
+      // D9: a week-board heading row is not a deadline.
+      { id: "s10", project_id: "p1", title: "주간 제목 줄", kind: "h1", sort_order: 1, due_date: today, assignee: null, note: null, color: "yellow", done: false, created_at: stamp(), deleted_at: null, projects: { name: "효곡지구 자연재해위험개선지구", code: null, deleted_at: null } },
       { id: "s2", project_id: "p9", title: "삭제된 과업 마감", due_date: today, assignee: null, note: null, color: "pink", done: false, created_at: stamp(), deleted_at: null, projects: { name: "삭제된 과업", code: null, deleted_at: today } },
     ];
     // My own private event: served next to the team rows, never written by the tests.
@@ -67,6 +69,9 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
       { id: "pv1", title: "내 병원 예약", category: "other", visibility: "private", starts_on: today, ends_on: today, starts_at: null, location: "", organizer: "", note: "", created_by: members[1].id, creator_name: members[1].name, creator_color: members[1].color, updated_at: "2026-01-01T00:00:00.000Z", deleted_at: null },
     ];
     let failDeadlines = false;
+    // D9: the first kind-filtered request answers "no kind column" once; the app must refetch unfiltered.
+    let kindMissingOnce = true;
+    const scheduleQueries = [];
     const projects = [
       {
         id: "p1",
@@ -104,6 +109,12 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
         return route.fulfill({ json: members });
       if (url.pathname.endsWith("/schedules")) {
         if (failDeadlines) return route.fulfill({ status: 500, json: { message: "schedules unavailable" } });
+        const kindFilter = url.searchParams.get("kind");
+        scheduleQueries.push(kindFilter);
+        if (kindFilter && kindMissingOnce) {
+          kindMissingOnce = false;
+          return route.fulfill({ status: 400, json: { code: "42703", message: "column schedules.kind does not exist" } });
+        }
         assert.ok(url.searchParams.get("select")?.includes("projects!inner("), "Deadlines must join live projects on the server.");
         const due = Object.fromEntries(url.searchParams.getAll("due_date").map((v) => v.split(".")));
         assert.ok(due.gte && due.lte, "Deadlines must be fetched for the visible range only.");
@@ -115,6 +126,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
         const rows = schedules
           .filter((row) => !row.deleted_at && row.due_date >= due.gte && row.due_date <= due.lte && (!liveProjectsOnly || !row.projects.deleted_at))
           .filter((row) => (!onlyProject || row.project_id === onlyProject) && (!openOnly || !row.done))
+          .filter((row) => kindFilter !== "eq.todo" || (row.kind ?? "todo") === "todo")
           .sort((a, b) => a.due_date.localeCompare(b.due_date));
         return route.fulfill({ json: rows.slice(0, limit) });
       }
@@ -211,6 +223,12 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.equal(await page.locator('a[title*="삭제된 과업"]').count(), 0, "Deadlines of trashed projects stay hidden.");
     assert.equal(await page.locator('a[title*="지워진 일정"]').count(), 0, "Soft-deleted schedules stay hidden.");
     assert.equal(await page.locator('[title*="다른 팀"]').count(), 0, "Another team's deadlines never show.");
+    // D9: deadlines ask for to-do rows only; a missing kind column (42703) refetches without the filter.
+    assert.equal(scheduleQueries[0], "eq.todo", "Deadlines must be fetched with kind=eq.todo.");
+    assert.equal(kindMissingOnce, false, "The mock answered the missing-column error.");
+    assert.ok(scheduleQueries.includes(null), "After 42703 the deadlines are refetched without the kind filter.");
+    assert.equal(await page.locator('a[title*="주간 제목 줄"]').count(), 0, "Week-board block rows are not deadlines.");
+    assert.equal(await page.getByText("주간 제목 줄").count(), 0);
     assert.equal(await calendar.getByTestId("calendar-legend").count(), 1, "The team room shows the legend.");
     await page.screenshot({ path: "artifacts/calendar-deadlines.png" });
     await page.getByRole("button", { name: "과업 마감", exact: true }).click();

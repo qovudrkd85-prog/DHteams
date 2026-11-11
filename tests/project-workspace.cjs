@@ -641,8 +641,39 @@ const deferred = () => {
       await thuMonthCell.getByRole("button", { name: "측량 준비", exact: true }).waitFor();
     }
     assert.equal(await board.count(), 0);
+
+    // D9: block rows (kind other than todo) stay off the month grid and count; the week board shows
+    // every row of a day in sort_order. Rows without kind are to-dos.
+    const fri = addDaysKey(monday, 4);
+    const remaining = async () => Number((await page.getByText(/남은 일 \d+건/).first().textContent()).match(/\d+/)[0]);
+    const remainingBefore = await remaining();
+    schedules.push(
+      weekRow("f1", "금 할 일 무종류", fri),
+      weekRow("f2", "금 제목 블록", fri, { kind: "h1", sort_order: -1 }),
+      weekRow("f3", "금 글 블록", fri, { kind: "text", sort_order: 2 }),
+      weekRow("f4", "금 할 일 순서", fri, { kind: "todo", sort_order: 1 }),
+    );
+    await fireFocus();
+    await page.getByText(`남은 일 ${remainingBefore + 2}건`, { exact: true }).waitFor();
+    assert.equal(await page.getByText("금 제목 블록").count(), 0, "A heading row is not shown in the month view.");
+    assert.equal(await page.getByText("금 글 블록").count(), 0, "A text row is not shown in the month view.");
+    const friMonthCell = page.locator(`[data-day="${fri}"]`);
+    if (await friMonthCell.count()) {
+      await friMonthCell.getByRole("button", { name: "금 할 일 무종류", exact: true }).waitFor();
+      await friMonthCell.getByRole("button", { name: "금 할 일 순서", exact: true }).waitFor();
+      assert.equal(await friMonthCell.getByRole("checkbox").count(), 2, "Only the to-dos sit in the month cell.");
+    }
+    await viewToggle.getByRole("button", { name: "주", exact: true }).click();
+    const friCell = board.locator(`[data-week-day="${fri}"]`);
+    await rowOf(friCell, "금 글 블록").waitFor();
+    const friTexts = await friCell.locator("[data-week-row]").allInnerTexts();
+    const friOrder = ["금 제목 블록", "금 할 일 무종류", "금 할 일 순서", "금 글 블록"].map((title) => friTexts.findIndex((text) => text.includes(title)));
+    assert.ok(friOrder.every((index, i) => index >= 0 && (i === 0 || index > friOrder[i - 1])), `Week rows follow sort_order: ${friTexts.join(" | ")}`);
+    await viewToggle.getByRole("button", { name: "월", exact: true }).click();
+    await page.getByText(`남은 일 ${remainingBefore + 2}건`, { exact: true }).waitFor();
+    assert.equal(await board.count(), 0);
     assert.deepEqual(errors, []);
-    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height (all on the fallback editor); D7 memo items fold/author/add without author fields/esc/edit conflict/delete undo/peer refresh; D8 week toggle/remembered view/done fold/quick add/toggle/rename conflict/delete undo/week nav/peer refresh/phone stack.");
+    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height (all on the fallback editor); D7 memo items fold/author/add without author fields/esc/edit conflict/delete undo/peer refresh; D8 week toggle/remembered view/done fold/quick add/toggle/rename conflict/delete undo/week nav/peer refresh/phone stack; D9 block rows off the month grid/count, week board in sort_order.");
   } finally {
     await browser.close();
   }

@@ -236,7 +236,8 @@ export async function listSchedules(projectId: string): Promise<Schedule[]> {
 export type ScheduleInput = Pick<
   Schedule,
   "title" | "due_date" | "assignee" | "note" | "color" | "done"
->;
+> &
+  Partial<Pick<Schedule, "kind" | "sort_order">>;
 
 export async function createSchedule(
   projectId: string,
