@@ -20,9 +20,9 @@ export function Garage({ workspace, healing, onHealingEnd }: GarageProps) {
     return <HealingPlace member={workspace.error ? null : workspace.currentMember} onBack={onHealingEnd} />;
   }
   return (
-    <section className="space-y-5" aria-label="내 정비실" data-testid="garage">
+    <section className="flex flex-col gap-5 *:min-w-0" aria-label="내 정비실" data-testid="garage">
       <TeamPanel workspace={workspace} />
-      <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:p-5" data-testid="garage-calendar">
+      <div className="phone-cal order-first rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:order-none sm:p-5" data-testid="garage-calendar">
         <DepartmentCalendar
           members={workspace.members}
           currentMember={workspace.error ? null : workspace.currentMember}

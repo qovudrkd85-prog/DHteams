@@ -128,3 +128,15 @@
     @apply font-sans;
   }
 }
+/* Phone width: personal calendar and dialogs get 40px tap targets. */
+@media (max-width: 639.98px) {
+  .phone-cal :is(button, select),
+  :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) :is(button, select) {
+    min-height: 2.5rem;
+    min-width: 2.5rem;
+  }
+  :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) :is(input, textarea) {
+    min-height: 2.5rem;
+    min-width: 0;
+  }
+}
