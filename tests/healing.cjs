@@ -294,3 +294,146 @@ console.log("PASS: healing weather mapping, scene suggestion, timer text, weathe
   assert.equal(w.hikeProgress(w.WORLD, ["mountain:hike-1", "mountain:hike-2", "mountain:hike-3"]), 3);
   console.log("PASS: healing world floor, props, portals, walking, hiking, activities, continuous world.");
 }
+
+// ---------------------------------------------------------------------------
+// Healing trail (healing-trail.ts) and view math (healing-view.ts): the "walk along" mode.
+// Each module is loaded in its own bare sandbox; both must keep type-only imports.
+// ---------------------------------------------------------------------------
+{
+  const load = (rel) => {
+    const src = fs.readFileSync(path.resolve(__dirname, rel), "utf8");
+    const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const box = { exports: {}, module: { exports: {} } };
+    box.exports = box.module.exports;
+    vm.runInNewContext(js, box);
+    return box.module.exports;
+  };
+  const same = (actual, expected, message) => assert.deepEqual(JSON.parse(JSON.stringify(actual)), JSON.parse(JSON.stringify(expected)), message);
+  const t = load("../src/lib/team/healing-trail.ts");
+  const idle = Object.freeze({ forward: 0, side: 0, tap: false });
+  const up = Object.freeze({ forward: 1, side: 0, tap: false });
+  const run = (state, seconds, input = idle, env) => {
+    let s = state;
+    for (let i = 0; i < Math.round(seconds * 30); i += 1) s = t.stepTrail(s, input, 1 / 30, env);
+    return s;
+  };
+
+  // A 1050 m loop of seven 150 m places; every place has a start point.
+  assert.equal(t.TRAIL_LENGTH, 1050);
+  same(t.TRAIL, ["beach", "fishing", "yard", "camp", "mountain", "snow-forest", "rooftop"]);
+  for (const scene of h.HEALING_SCENES) assert.equal(t.biomeAt(t.trailStart(scene.id)).id, scene.id, scene.id);
+  assert.equal(t.trailStart("nope"), 0);
+  // Biome blending near the seams and wrap-around both ways.
+  const seam = t.biomeAt(149);
+  assert.equal(seam.id, "beach"); assert.equal(seam.next, "fishing"); assert.ok(seam.blend > 0 && seam.blend <= 0.5);
+  assert.equal(t.biomeAt(75).blend, 0);
+  assert.equal(t.biomeAt(1060).id, "beach");
+  assert.equal(t.biomeAt(-5).id, "rooftop");
+
+  // No input: the character stands and the world holds still.
+  const start = Object.freeze(t.initialTrailState("beach"));
+  const still = run(start, 10);
+  assert.equal(still.distance, start.distance); assert.equal(still.phase, "standing");
+  // Holding up walks ~1.2 m/s (frozen input state proves no mutation).
+  const walked = run(Object.freeze({ ...start, distance: 20 }), 60, up);
+  assert.ok(Math.abs(walked.distance - 92) < 1, `60 s walk ~72 m, got ${walked.distance}`);
+  assert.equal(walked.phase, "walking");
+  assert.equal(t.stepTrail(walked, idle, 1 / 30).phase, "standing", "letting go stops");
+  // Down walks back, facing the camera, and wraps behind the start.
+  const back = run(Object.freeze({ ...start, distance: 1 }), 5, { forward: -1, side: 0, tap: false });
+  assert.ok(back.distance > 1040 && back.distance < 1050, `wrapped back, got ${back.distance}`);
+  assert.equal(back.facing, -1);
+  // Left/right moves across the path but never off it away from an entrance.
+  const across = run(Object.freeze({ ...start, distance: 60 }), 6, { forward: 0, side: 1, tap: false });
+  assert.equal(across.lateral, t.WALK_HALF); assert.notEqual(across.phase, "entering");
+  assert.equal(run(across, 12, { forward: 0, side: -1, tap: false }).lateral, -t.WALK_HALF);
+  // Tap (phone): start walking hands-free, tap again to stop.
+  let tapped = t.stepTrail(start, { forward: 0, side: 0, tap: true }, 1 / 30);
+  tapped = run(tapped, 10);
+  assert.ok(Math.abs(tapped.distance - start.distance - 12) < 0.5, `tap walk, got ${tapped.distance}`);
+  tapped = run(t.stepTrail(tapped, { forward: 0, side: 0, tap: true }, 1 / 30), 3);
+  assert.equal(tapped.phase, "standing");
+
+  // Fishing: walk up to the signposted entrance, step off the path toward it, sit and fish.
+  let s = t.initialTrailState("fishing");
+  const fishSpot = t.TRAIL_SPOTS.find((spot) => spot.activity === "fishing");
+  for (let i = 0; i < 2000 && s.distance < fishSpot.at - 0.5; i += 1) s = t.stepTrail(s, up, 1 / 30);
+  assert.ok((s.distance - t.trailStart("fishing")) / 1.2 < 20, "entrance reached within 20 s");
+  assert.equal(t.entranceAt(s.distance).id, fishSpot.id);
+  assert.equal(t.entranceAt(60), null, "no entrance in the middle of the beach");
+  s = run(s, 8, { forward: 0, side: fishSpot.side, tap: false });
+  assert.equal(s.phase, "activity"); assert.equal(t.activityOf(s), "fishing"); assert.equal(s.spotId, fishSpot.id);
+  assert.ok(Math.abs(s.lateral) > t.WALK_HALF, "sitting off the path");
+  const fishing = run(s, 120);
+  assert.equal(fishing.phase, "activity", "stays fishing until a key");
+  let leave = t.stepTrail(fishing, up, 1 / 30);
+  assert.equal(leave.phase, "leaving");
+  leave = run(leave, 6, up);
+  assert.equal(leave.phase, "walking"); assert.ok(Math.abs(leave.lateral) <= t.WALK_HALF, "back on the path");
+  assert.equal(t.activityOf(leave), "walk");
+  // The telescope is a night-only spot.
+  const scope = t.TRAIL_SPOTS.find((spot) => spot.activity === "stargaze");
+  assert.equal(t.entranceAt(scope.at, true), null);
+  assert.equal(t.entranceAt(scope.at, false).id, scope.id);
+  const atScope = Object.freeze({ ...t.initialTrailState("rooftop"), distance: scope.at });
+  assert.notEqual(run(atScope, 8, { forward: 0, side: scope.side, tap: false }, { isDay: true }).phase, "activity");
+  assert.equal(run(atScope, 8, { forward: 0, side: scope.side, tap: false }, { isDay: false }).phase, "activity");
+
+  // Spots: each place has its own first spot 18 m in, activities are known ones, the summit is the 3rd hike.
+  const known = new Set(h.HEALING_ACTIVITIES.map((a) => a.id));
+  for (const spot of t.TRAIL_SPOTS) { assert.ok(known.has(spot.activity), spot.id); assert.ok(spot.side === 1 || spot.side === -1); }
+  t.TRAIL.forEach((biome, i) => assert.ok(t.TRAIL_SPOTS.some((spot) => spot.biome === biome && spot.at === i * 150 + 18), `${biome} first spot`));
+  const hikes = t.TRAIL_SPOTS.filter((spot) => spot.activity === "hike");
+  assert.equal(hikes.length, 3); assert.equal(hikes[2].summit, true);
+
+  // Bad time steps are safe.
+  for (const dt of [0, -1, Number.NaN]) assert.equal(t.stepTrail(start, up, dt).distance, start.distance, `dt ${dt}`);
+  const jump = t.stepTrail(start, up, 1000);
+  assert.ok(jump.distance > start.distance && jump.distance - start.distance < 0.5, "huge dt is clamped");
+  console.log("PASS: healing trail loop, standing still, arrow walking, path edges, tap walk, entering spots, night spot, safe steps.");
+
+  // ---- View math ----
+  const v = load("../src/lib/team/healing-view.ts");
+  const vp = { width: 640, height: 360 };
+  const cam = { x: 0, look: 0 };
+  const horizon = vp.height * v.HORIZON;
+  const near = v.project(0, v.CHARACTER_Z, cam, vp);
+  const far = v.project(0, 40, cam, vp);
+  assert.ok(Math.abs(near.y - vp.height * v.FEET) < 0.5, "character feet at 78%");
+  assert.ok(near.y > far.y && near.scale > far.scale, "nearer is lower and bigger");
+  for (const z of [0.6, 10, 1e6]) assert.ok(v.project(0, z, cam, vp).y >= horizon, `z ${z} not above horizon`);
+  assert.equal(v.project(0, 0, cam, vp), null);
+  assert.ok(v.project(-2, 10, cam, vp).x < vp.width / 2);
+  assert.equal(v.CURVE_PERIOD, t.TRAIL_LENGTH);
+  for (const d of [0, 77, 500]) { assert.ok(Math.abs(v.curveAt(d) - v.curveAt(d + 1050)) < 1e-9); assert.ok(Math.abs(v.curveAt(d)) < 0.01); }
+  const strips = v.roadStrips(160, vp, cam);
+  assert.ok(strips.length >= 20 && strips.length <= 60);
+  for (let i = 1; i < strips.length; i += 1) { assert.ok(strips[i].z > strips[i - 1].z); assert.ok(strips[i].y <= strips[i - 1].y); assert.ok(strips[i].y >= horizon); }
+  assert.ok(strips.some((strip) => Math.abs(strip.x - vp.width / 2) > 5), "the path bends");
+  const a = v.scatter(12, "fishing"); const b = v.scatter(12, "fishing");
+  same(a, b, "scatter is deterministic");
+  for (let chunk = 0; chunk < 80; chunk += 1) {
+    const props = v.scatter(chunk, t.TRAIL[chunk % 7]);
+    assert.ok(props.length <= v.MAX_PROPS_PER_CHUNK);
+    for (const p of props) assert.ok(Math.abs(p.x) >= v.ROAD_HALF + 0.3, `prop on the path ${JSON.stringify(p)}`);
+  }
+  const hex = /^#[0-9a-f]{6}$/;
+  for (const biome of t.TRAIL) for (const isDay of [true, false]) for (const effect of ["clear", "cloudy", "rain", "snow", "fog"]) {
+    const pal = v.palette(biome, isDay, effect);
+    for (const [key, value] of Object.entries(pal)) if (typeof value === "string") assert.match(value, hex, `${biome} ${isDay} ${effect} ${key}`);
+  }
+  const p1 = v.palette("fishing", true, "clear"); const p2 = v.palette("camp", false, "fog");
+  same(v.mixPalette(p1, p2, 0), p1); same(v.mixPalette(p1, p2, 1), p2);
+  assert.equal(v.lerpColor("#000000", "#ffffff", 0.5), "#808080");
+  assert.equal(v.lerpColor("#102030", "#102030", 0.7), "#102030");
+  // Same person as in the office (character.tsx seed rule).
+  for (const [avatar, name] of [["🐻", "김철수"], ["A", "Lee"], ["", "박"], ["🦊", "Fox Kim"]]) {
+    const seed = Array.from(avatar + name).reduce((sum, ch) => sum + (ch.codePointAt(0) ?? 0), 0);
+    same(v.characterLook(avatar, name), {
+      skin: ["#efc8a6", "#ddb18f", "#bc896b", "#f2d6bd"][seed % 4],
+      hair: ["#4f4038", "#76604b", "#353d3b", "#916647"][Math.floor(seed / 3) % 4],
+      glasses: seed % 4 === 1, hairStyle: seed % 2,
+    }, name);
+  }
+  console.log("PASS: healing view projection, bends, scatter, palettes, character look.");
+}
