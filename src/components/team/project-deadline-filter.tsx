@@ -20,38 +20,6 @@ const UPCOMING_DAYS = 60;
 /** How far back the project list looks for open overdue deadlines (shown as D+n). */
 const OVERDUE_DAYS = 30;
 
-/** Choose one project (or all) while the team calendar shows deadlines only. */
-export function ProjectPicker({
-  projects,
-  value,
-  onChange,
-}: {
-  projects: readonly Pick<Project, "id" | "name">[];
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  const known = value === "all" || projects.some((p) => p.id === value);
-  return (
-    <label className="flex items-center gap-1.5 text-xs text-slate-500">
-      {value !== "all" && <span className={cn("size-2 rounded-full", projectTone(value).dot)} aria-hidden="true" />}
-      <select
-        aria-label="과업 선택"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="max-w-48 truncate rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
-      >
-        <option value="all">모든 과업</option>
-        {!known && <option value={value}>선택한 과업</option>}
-        {projects.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
 /**
  * `/?project=<id>` (from a project's calendar) asks the team calendar to open on that project.
  * Render inside <Suspense>; the parent clears the param once it has taken the id.
