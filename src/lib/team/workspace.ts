@@ -128,7 +128,8 @@ export async function checkIn(memberId: string): Promise<Attendance> {
   // A second attempt also covers midnight passing between the insert and read.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const { data, error } = await client.from("team_attendance")
-      .upsert({ member_id: memberId }, { onConflict: "member_id,work_date", ignoreDuplicates: true })
+      // team_id is stamped by the database from the active team (one row per person, team and day).
+      .upsert({ member_id: memberId }, { onConflict: "member_id,team_id,work_date", ignoreDuplicates: true })
       .select().maybeSingle();
     if (error) throw databaseError(error);
     if (data) return data as Attendance;

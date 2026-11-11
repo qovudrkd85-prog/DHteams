@@ -279,9 +279,44 @@ async function rpcSuite() {
   }
 }
 
+// M3: attendance is kept per team — one check-in per person, team and day.
+async function attendanceSuite() {
+  const { db, one, rows, rejects, session, admin, members } = await openDb();
+  // Same statement the app sends (upsert with ignoreDuplicates); the team comes from the active team.
+  const checkIn = (memberId) => rows(
+    "insert into team_attendance(member_id) values ($1) on conflict (member_id, team_id, work_date) do nothing returning *", [memberId],
+  );
+  try {
+    await db.exec(readSql("schema-team-memberships"));
+    await session(ids.alice);
+    const teamA = await one("select * from create_team('A팀')");
+    const teamB = await one("select * from create_team('B팀')");
+    await one("select * from switch_team($1)", [teamA.id]);
+    const [inA] = await checkIn(members.alice.id);
+    assert.equal(inA.team_id, teamA.id);
+    assert.equal((await checkIn(members.alice.id)).length, 0, "same team twice is ignored");
+    await one("select * from switch_team($1)", [teamB.id]);
+    const [inB] = await checkIn(members.alice.id);
+    assert.equal(inB.team_id, teamB.id);
+    assert.deepEqual((await rows("select id from team_attendance")).map((r) => r.id), [inB.id]);
+    await one("update team_attendance set checked_out_at = now() where id = $1 returning id", [inB.id]);
+    assert.equal((await db.query("update team_attendance set checked_out_at = now() where id = $1", [inA.id])).affectedRows, 0);
+    await rejects("update team_attendance set team_id = $2 where id = $1", [inB.id, teamA.id]);
+    await one("select * from switch_team($1)", [teamA.id]);
+    const visibleA = await rows("select id, checked_out_at from team_attendance");
+    assert.deepEqual(visibleA.map((r) => [r.id, r.checked_out_at]), [[inA.id, null]]);
+    await admin();
+    assert.equal((await one("select count(*)::int as n from team_attendance where member_id = $1", [members.alice.id])).n, 2);
+  } finally {
+    await db.close();
+  }
+}
+
 (async () => {
   await migrationSuite();
   await rpcSuite();
+  await attendanceSuite();
   console.log("PASS: membership migration (owners from creators, repeatable), active-team foreign key, no direct membership writes, schema-teams re-run guard, isolation kept, cross-team mates without cross-team positions.");
   console.log("PASS: create/join add memberships, switch_team (members only, presence dropped, desks kept), per-team data, per-team owner role for code rotation, leave moves to latest remaining team, owner promotion, empty team kept, 20-team limit.");
+  console.log("PASS: attendance per team (check in again after switching, each team sees its own row, no cross-team check-out).");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -41,6 +41,17 @@ begin
 end;
 $$;
 
+-- 출퇴근은 팀별로: 같은 날 A팀 출근 뒤 B팀에서도 출근할 수 있습니다(사람·팀·날짜당 1줄).
+alter table public.team_attendance drop constraint if exists team_attendance_member_date_key;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'team_attendance_member_team_date_key') then
+    alter table public.team_attendance add constraint team_attendance_member_team_date_key
+      unique (member_id, team_id, work_date);
+  end if;
+end;
+$$;
+
 alter table public.team_memberships enable row level security;
 revoke all on table public.team_memberships from public, anon, authenticated;
 grant select on table public.team_memberships to authenticated;
