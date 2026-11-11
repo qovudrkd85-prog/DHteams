@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ArrowUpRight, FolderOpen, Search, Sprout } from "lucide-react";
 
@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createProject, listProjects } from "@/lib/queries";
+import { sameProjects } from "@/lib/project-list";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import type { Project } from "@/lib/types";
 import { useTeamWorkspace } from "@/lib/team/use-team-workspace";
@@ -65,25 +66,29 @@ export default function HomePage() {
       .includes(search.trim().toLocaleLowerCase()),
   );
 
-  const reload = useCallback(
-    () =>
-      listProjects()
-        .then((rows) => {
-          setProjects(rows);
-          setLoadError(null);
-        })
-        .catch((error) => {
-          setLoadError(
-            error instanceof Error
-              ? error.message
-              : "과업을 불러오지 못했습니다.",
-          );
-        })
-        .finally(() => {
-          setLoading(false);
-        }),
-    [],
-  );
+  // Bumped by every load and by local creates, so a late response cannot overwrite newer rows.
+  const version = useRef(0);
+  const reload = useCallback((background = false) => {
+    const mine = ++version.current;
+    return listProjects()
+      .then((rows) => {
+        if (mine !== version.current) return;
+        setProjects((prev) => (sameProjects(prev, rows) ? prev : rows));
+        setLoadError(null);
+      })
+      .catch((error) => {
+        // A failed background refresh keeps the current list quietly.
+        if (background || mine !== version.current) return;
+        setLoadError(
+          error instanceof Error
+            ? error.message
+            : "과업을 불러오지 못했습니다.",
+        );
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -91,7 +96,19 @@ export default function HomePage() {
       return;
     }
 
+    const versionRef = version;
     void reload();
+    // Teammates' new projects (and their deadlines on the team calendar) arrive without a reload.
+    const onVisible = () => { if (document.visibilityState === "visible") void reload(true); };
+    const timer = window.setInterval(onVisible, 30000);
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      versionRef.current++;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [router, reload]);
 
   const takeFocus = useCallback(
@@ -109,6 +126,7 @@ export default function HomePage() {
     setBusy(true);
     try {
       const created = await createProject(form);
+      version.current++;
       setProjects((prev) => [created, ...prev]);
       setForm({ name: "", code: "", description: "" });
       setOpen(false);
@@ -354,7 +372,7 @@ export default function HomePage() {
       <TrashDialog
         open={trashOpen}
         onOpenChange={setTrashOpen}
-        onRestored={reload}
+        onRestored={() => void reload()}
       />
     </>
   );

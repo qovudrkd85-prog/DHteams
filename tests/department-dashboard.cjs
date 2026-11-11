@@ -487,6 +487,18 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
       path: "artifacts/dashboard-desktop.png",
       fullPage: true,
     });
+    // A teammate's new project (and its deadline today) shows up on focus, without a reload.
+    projects.push({ id: "p4", name: "동료가 만든 과업", code: "2026-04", description: "", created_at: today });
+    schedules.push({ id: "s8", project_id: "p4", title: "동료 과업 마감", due_date: today, assignee: null, note: null, color: "blue", done: false, created_at: stamp(), deleted_at: null, projects: { name: "동료가 만든 과업", code: "2026-04", deleted_at: null } });
+    assert.equal(await page.locator('aside a[href="/projects/p4?view=schedule"]').count(), 0);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.locator('aside a[href="/projects/p4?view=schedule"]').waitFor();
+    await calendar.locator('[data-project-chip="p4"]').waitFor();
+    projects.pop();
+    schedules.pop();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.locator('aside a[href="/projects/p4?view=schedule"]').waitFor({ state: "detached" });
+    await calendar.locator('[data-project-chip="p4"]').waitFor({ state: "detached" });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
     await calendar.waitFor();

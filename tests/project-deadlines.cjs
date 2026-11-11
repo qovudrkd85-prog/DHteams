@@ -75,4 +75,19 @@ assert.deepEqual(Array.from(groups[1].deadlines, (x) => x.id), ["a1", "a2"]);
 assert.equal(groups[1].project_name, "name-A");
 assert.equal(pd.groupDeadlinesByProject([]).length, 0);
 
-console.log("PASS: project tone map avoids clashes and is stable, deadline groups by project.");
+// The hub keeps its project array when a background refresh returns the same rows.
+const listSource = fs.readFileSync(path.resolve(__dirname, "../src/lib/project-list.ts"), "utf8");
+const listBox = { exports: {}, module: { exports: {} }, require: (name) => { throw new Error(`unexpected import ${name}`); } };
+listBox.exports = listBox.module.exports;
+vm.runInNewContext(ts.transpileModule(listSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, listBox);
+const { sameProjects } = listBox.module.exports;
+const row = (id, extra = {}) => ({ id, name: `n-${id}`, code: null, description: "", owner_id: "o", created_at: "t", ...extra });
+assert.equal(sameProjects([row("a"), row("b")], [row("a", { created_at: "later" }), row("b")]), true, "Only shown fields count.");
+assert.equal(sameProjects([row("a")], [row("a"), row("b")]), false, "A new project changes the list.");
+assert.equal(sameProjects([row("a"), row("b")], [row("b"), row("a")]), false, "Order matters.");
+assert.equal(sameProjects([row("a")], [row("a", { name: "renamed" })]), false);
+assert.equal(sameProjects([row("a")], [row("a", { code: "C-1" })]), false);
+assert.equal(sameProjects([row("a")], [row("a", { description: "new" })]), false);
+assert.equal(sameProjects([], []), true);
+
+console.log("PASS: project tone map avoids clashes and is stable, deadline groups by project, same-list check.");
