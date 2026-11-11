@@ -59,6 +59,7 @@ export function useOfficePresence({ member, layout, paused, viewportRef, obstacl
   const activeKey = useRef("");
   const interacted = useRef(false);
   const held = useRef(new Set<OfficeDirection>());
+  const target = useRef<{ x: number; y: number } | null>(null);
   const animation = useRef<number | null>(null);
   const lastFrame = useRef<number | null>(null);
   const mounted = useRef(false);
@@ -106,6 +107,7 @@ export function useOfficePresence({ member, layout, paused, viewportRef, obstacl
   const stopMovement = useCallback(() => {
     const wasMoving = held.current.size > 0 || animation.current !== null;
     held.current.clear();
+    target.current = null;
     if (animation.current !== null) cancelAnimationFrame(animation.current);
     animation.current = null;
     lastFrame.current = null;
@@ -132,12 +134,25 @@ export function useOfficePresence({ member, layout, paused, viewportRef, obstacl
   const animate = useCallback((time: number) => {
     const state = runtime.current;
     const current = position.current;
-    if (!current || !state.layout || state.paused || modalVisible() || held.current.size === 0) { stopMovement(); return; }
+    if (!current || !state.layout || state.paused || modalVisible() || (held.current.size === 0 && !target.current)) { stopMovement(); return; }
     const dt = Math.min(0.05, lastFrame.current === null ? 1 / 60 : (time - lastFrame.current) / 1000);
     lastFrame.current = time;
-    const dx = Number(held.current.has("right")) - Number(held.current.has("left"));
-    const dy = Number(held.current.has("down")) - Number(held.current.has("up"));
+    // Held keys win; otherwise head for the tapped point.
+    const goal = held.current.size === 0 ? target.current : null;
+    const dx = goal ? goal.x - current.x : Number(held.current.has("right")) - Number(held.current.has("left"));
+    const dy = goal ? goal.y - current.y : Number(held.current.has("down")) - Number(held.current.has("up"));
     const length = Math.hypot(dx, dy);
+    if (goal && length <= speed * dt) {
+      // Arrived (or close enough): land on the goal if it is free floor, then stop.
+      const landing = bounded(goal.x, goal.y, state.layout);
+      if (!blocked(landing.x, landing.y, state.layout, state.obstacles)) {
+        const next = { ...current, ...landing, motion: "standing" as const };
+        position.current = next;
+        setPlayer(next);
+      }
+      stopMovement();
+      return;
+    }
     if (length) {
       const stepX = dx / length * speed * dt;
       const stepY = dy / length * speed * dt;
@@ -146,6 +161,8 @@ export function useOfficePresence({ member, layout, paused, viewportRef, obstacl
       const x = blocked(candidate.x, current.y, state.layout, state.obstacles) ? current.x : candidate.x;
       const y = blocked(x, candidate.y, state.layout, state.obstacles) ? current.y : candidate.y;
       const facing: OfficeDirection = Math.abs(dx) >= Math.abs(dy) ? dx > 0 ? "right" : "left" : dy > 0 ? "down" : "up";
+      // Blocked (or only creeping along furniture): stop as close as we got.
+      if (goal && Math.hypot(x - current.x, y - current.y) < speed * dt * 0.25) { stopMovement(); return; }
       const next = { ...current, x, y, facing, motion: "standing" as const };
       position.current = next;
       setPlayer(next);
@@ -159,8 +176,19 @@ export function useOfficePresence({ member, layout, paused, viewportRef, obstacl
     if (runtime.current.paused || !position.current || !runtime.current.member || !runtime.current.layout || document.visibilityState !== "visible" || modalVisible()) return;
     interacted.current = true;
     if (position.current.motion === "seated") stand();
+    target.current = null;
     held.current.add(direction);
     // Keep a keyboard-operated direction button focused so its keyup can stop us.
+    if (animation.current === null) animation.current = requestAnimationFrame(animateRef.current);
+  }, [stand]);
+
+  /** Walk toward a room point (tap/click). Same gates as the arrow keys; stands up first if seated. */
+  const walkTo = useCallback((point: { x: number; y: number }) => {
+    if (runtime.current.paused || !position.current || !runtime.current.member || !runtime.current.layout || document.visibilityState !== "visible" || modalVisible()) return;
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+    interacted.current = true;
+    if (position.current.motion === "seated") stand();
+    target.current = { x: point.x, y: point.y };
     if (animation.current === null) animation.current = requestAnimationFrame(animateRef.current);
   }, [stand]);
 
@@ -299,5 +327,5 @@ export function useOfficePresence({ member, layout, paused, viewportRef, obstacl
   // A room/member prop can change one render before the initialization effect.
   const visiblePlayer = player?.layout_id === layoutId && player?.member_id === memberId ? player : null;
   const visiblePeers = peers.filter((peer) => peer.layout_id === layoutId && peer.member_id !== memberId);
-  return { player: visiblePlayer, peers: visiblePeers, moving: Boolean(visiblePlayer) && moving, syncError, onKeyDown, onKeyUp, startDirection, stopMovement, sit, stand };
+  return { player: visiblePlayer, peers: visiblePeers, moving: Boolean(visiblePlayer) && moving, syncError, onKeyDown, onKeyUp, startDirection, stopMovement, sit, stand, walkTo };
 }
