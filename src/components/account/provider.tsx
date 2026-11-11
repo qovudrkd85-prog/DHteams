@@ -26,6 +26,7 @@ type AccountContextValue = {
 export type TeamActionInput =
   | { action: "create"; name: string }
   | { action: "join"; code: string }
+  | { action: "switch"; teamId: string }
   | { action: "leave" }
   | { action: "regenerate" };
 

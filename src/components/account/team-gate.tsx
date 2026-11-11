@@ -9,16 +9,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-type GateMode = "join" | "create";
+export type TeamFormMode = "join" | "create";
 
-// Shown after profile setup when the account has no team yet.
-export function TeamGate() {
-  const { account, teamAction, signOut } = useAccount();
-  const [mode, setMode] = useState<GateMode>("join");
+interface TeamFormProps {
+  mode: TeamFormMode;
+  /** Prefix for input ids so the gate and the header menu can coexist. */
+  idPrefix?: string;
+  onBusyChange?: (busy: boolean) => void;
+  onDone?: () => void;
+  /** Extra controls on the left of the submit button (gate: log out, menu: back). */
+  leading?: React.ReactNode;
+}
+
+// Join with an invite code or create a team. Used by the team gate and the header team menu.
+export function TeamForm({ mode, idPrefix = "team", onBusyChange, onDone, leading }: TeamFormProps) {
+  const { teamAction } = useAccount();
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusyState] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const setBusy = (value: boolean) => { setBusyState(value); onBusyChange?.(value); };
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -31,12 +41,41 @@ export function TeamGate() {
     try {
       await teamAction(mode === "create" ? { action: "create", name: trimmedName } : { action: "join", code: cleanCode });
       toast.success(mode === "create" ? `${trimmedName} 팀을 만들었습니다. 설정 > 팀에서 초대코드를 확인하세요.` : "팀에 참가했습니다.");
+      onDone?.();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "팀 요청을 처리하지 못했습니다.");
     } finally {
       setBusy(false);
     }
   }
+
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <fieldset disabled={busy} className="space-y-2">
+        {mode === "join" ? (
+          <><Label htmlFor={`${idPrefix}-code`}>초대코드</Label><Input id={`${idPrefix}-code`} autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={12} value={code} onChange={(event) => setCode(event.target.value)} placeholder="예) K7QM-3XPA" className="font-mono tracking-widest uppercase" /></>
+        ) : (
+          <><Label htmlFor={`${idPrefix}-name`}>팀 이름</Label><Input id={`${idPrefix}-name`} maxLength={40} value={name} onChange={(event) => setName(event.target.value)} placeholder="예) 설계1팀" /></>
+        )}
+      </fieldset>
+      {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs leading-6 text-red-700">{error}</p>}
+      <div className="flex items-center justify-between gap-2">
+        <div>{leading}</div>
+        <Button type="submit" disabled={busy || (mode === "join" ? !code.trim() : !name.trim())} className="bg-teal-800 text-white hover:bg-teal-900">
+          {busy ? <LoaderCircle className="size-4 animate-spin" /> : mode === "join" ? <Ticket className="size-4" /> : <Plus className="size-4" />}
+          {mode === "join" ? "참가하기" : "팀 만들기"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// Shown after profile setup when the account has no team yet.
+export function TeamGate() {
+  const { account, signOut } = useAccount();
+  const [mode, setMode] = useState<TeamFormMode>("join");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function logout() {
     setBusy(true);
@@ -45,7 +84,7 @@ export function TeamGate() {
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-[#f5f7f1] p-6">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-5 rounded-2xl bg-white p-6 shadow-sm" aria-labelledby="team-gate-title">
+      <section className="w-full max-w-sm space-y-5 rounded-2xl bg-white p-6 shadow-sm" aria-labelledby="team-gate-title">
         <div className="space-y-1">
           <h1 id="team-gate-title" className="text-lg font-semibold text-teal-900">우리 팀 공간 들어가기</h1>
           <p className="text-xs leading-5 text-slate-500">{account?.member.name}님, 팀원에게 받은 초대코드로 참가하거나 새 팀을 만들어 주세요. 과업·사무실·팀 일정은 같은 팀끼리만 보입니다.</p>
@@ -57,22 +96,9 @@ export function TeamGate() {
             </button>
           ))}
         </div>
-        <fieldset disabled={busy} className="space-y-2">
-          {mode === "join" ? (
-            <><Label htmlFor="team-code">초대코드</Label><Input id="team-code" autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={12} value={code} onChange={(event) => setCode(event.target.value)} placeholder="예) K7QM-3XPA" className="font-mono tracking-widest uppercase" /></>
-          ) : (
-            <><Label htmlFor="team-name">팀 이름</Label><Input id="team-name" maxLength={40} value={name} onChange={(event) => setName(event.target.value)} placeholder="예) 설계1팀" /></>
-          )}
-        </fieldset>
+        <TeamForm key={mode} mode={mode} onBusyChange={setBusy} leading={<Button type="button" variant="ghost" disabled={busy} onClick={() => void logout()}><LogOut className="size-3.5" />로그아웃</Button>} />
         {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs leading-6 text-red-700">{error}</p>}
-        <div className="flex items-center justify-between gap-2">
-          <Button type="button" variant="ghost" disabled={busy} onClick={() => void logout()}><LogOut className="size-3.5" />로그아웃</Button>
-          <Button type="submit" disabled={busy || (mode === "join" ? !code.trim() : !name.trim())} className="bg-teal-800 text-white hover:bg-teal-900">
-            {busy ? <LoaderCircle className="size-4 animate-spin" /> : mode === "join" ? <Ticket className="size-4" /> : <Plus className="size-4" />}
-            {mode === "join" ? "참가하기" : "팀 만들기"}
-          </Button>
-        </div>
-      </form>
+      </section>
     </main>
   );
 }

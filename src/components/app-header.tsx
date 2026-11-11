@@ -5,6 +5,7 @@ import { useState } from "react";
 import { LogOut, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { useAccount } from "@/components/account/provider";
+import { TeamSwitcher } from "@/components/account/team-switcher";
 import { Button } from "@/components/ui/button";
 
 export function AppHeader({ children }: { children?: React.ReactNode }) {
@@ -27,6 +28,7 @@ export function AppHeader({ children }: { children?: React.ReactNode }) {
       <Link href="/" className="shrink-0 text-base font-semibold tracking-tight">
         Teams
       </Link>
+      <TeamSwitcher />
       <div className="min-w-0 flex-1 overflow-hidden">{children}</div>
       {account && <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         <div className="mr-1 hidden min-w-0 text-right sm:block">
