@@ -74,7 +74,7 @@ function airStep(y: number, vy: number, held: boolean): { y: number; vy: number 
 function jumpPath(dh: number, holdSteps: number): readonly number[] {
   const ys: number[] = [];
   let y = 0;
-  let vy = JUMP_V;
+  let vy: number = JUMP_V;
   for (let n = 1; n <= MAX_FLIGHT_STEPS; n += 1) {
     const next = airStep(y, vy, n <= holdSteps);
     y = next.y;

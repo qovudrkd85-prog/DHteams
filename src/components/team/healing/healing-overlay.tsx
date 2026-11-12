@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import { CloudSun, X } from "lucide-react";
 import { toast } from "sonner";
 import { useAccount } from "@/components/account/provider";
@@ -13,6 +14,9 @@ import type { SceneArtId, WorldActivityId } from "@/lib/team/healing-world";
 import { cn } from "@/lib/utils";
 import { HealingWorld, type WalkRequest, type WorldTeleport } from "./healing-world";
 import styles from "./healing.module.css";
+
+// The runner game is downloaded only when someone picks 달리기.
+const HealingRunner = dynamic(() => import("./runner/healing-runner").then((m) => m.HealingRunner), { ssr: false });
 
 /** What the extra controls get: where I am, what I am doing, and a way to walk to an activity. */
 export interface HealingWorldContext {
@@ -82,6 +86,11 @@ export function HealingOverlay({ onClose, inline: inlineProp = false, compact = 
   const statusAtOpen = useRef(account?.member.status_message ?? "");
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  // Walk or run (garage small window only); not saved, every open starts walking.
+  const [mode, setMode] = useState<"walk" | "run">("walk");
+  const running = compact && mode === "run";
+  // Always empty: handed to the walk world while running so it takes no keys.
+  const noKeysRef = useRef<HTMLElement | null>(null);
   // Latest onClose for window listeners registered once per open.
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
@@ -188,17 +197,21 @@ export function HealingOverlay({ onClose, inline: inlineProp = false, compact = 
 
   const world = (
     <>
-      <HealingWorld
-        startZone={startZone}
-        teleport={teleport}
-        walkRequest={walkRequest}
-        member={account?.member ?? null}
-        isDay={weather?.isDay ?? true}
-        effect={weather?.effect ?? "clear"}
-        focusRoot={dialogRef}
-        onZone={setWorldScene}
-        onActivity={setActivity}
-      />
+      {/* Kept mounted while running so the walk keeps its spot. */}
+      <div hidden={running}>
+        <HealingWorld
+          startZone={startZone}
+          teleport={teleport}
+          walkRequest={walkRequest}
+          member={account?.member ?? null}
+          isDay={weather?.isDay ?? true}
+          effect={weather?.effect ?? "clear"}
+          focusRoot={running ? noKeysRef : dialogRef}
+          onZone={setWorldScene}
+          onActivity={setActivity}
+        />
+      </div>
+      {running && <HealingRunner member={account?.member ?? null} isDay={weather?.isDay ?? true} />}
       <WeatherEffects effect={weather?.effect ?? "clear"} />
       <div className={styles.vignette} />
     </>
@@ -244,11 +257,19 @@ export function HealingOverlay({ onClose, inline: inlineProp = false, compact = 
         </div>
         <div className="relative aspect-video w-full overflow-hidden bg-black">{world}</div>
         <div className="space-y-2 p-2">
-          {children?.({ sceneId: worldScene, activity, walkTo })}
-          {sceneChips}
+          {!running && children?.({ sceneId: worldScene, activity, walkTo })}
+          {!running && sceneChips}
           <details className="text-xs text-white/80">
-            <summary className="cursor-pointer select-none py-1">도시·시간</summary>
-            <div className="pt-1">{settings}</div>
+            <summary className="cursor-pointer select-none py-1">모드·도시·시간</summary>
+            <div className="space-y-2 pt-1">
+              <span className="flex items-center gap-1" role="group" aria-label="모드">
+                {(["walk", "run"] as const).map((item) => (
+                  <button key={item} type="button" aria-pressed={mode === item} data-testid={`healing-mode-${item}`} onClick={() => setMode(item)} className={cn("rounded px-2 py-1", mode === item ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25")}>{item === "walk" ? "산책" : "달리기"}</button>
+                ))}
+                {running && <span className="ml-1 text-white/70">Space/탭 = 점프 · 길게 = 높이</span>}
+              </span>
+              {settings}
+            </div>
           </details>
         </div>
       </div>
