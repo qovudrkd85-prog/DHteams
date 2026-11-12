@@ -307,6 +307,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     const nextMonday = new Date(todayUtc.getTime() + (7 - ((todayUtc.getUTCDay() + 6) % 7)) * 86400000).toISOString().slice(0, 10);
     // Near the month end next Monday is in the next month and never in this list; the toggle is still checked.
     const nextWeekInMonth = nextMonday.slice(0, 7) === today.slice(0, 7);
+    const baseCount = await monthList.getByTestId("month-deadline-count").innerText();
     if (nextWeekInMonth) {
       schedules.push({ id: "s11", project_id: "p3", title: "다음 주 현장 회의", due_date: nextMonday, assignee: "이지은", note: null, color: "green", done: false, created_at: stamp(), deleted_at: null, projects: { name: "후포지구 풍수해생활권", code: "2026-03", deleted_at: null } });
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -330,7 +331,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
       await monthList.locator('[data-deadline-row="s11"]').waitFor({ state: "detached" });
     }
-    assert.equal(await listCount(), monthCount);
+    assert.equal(await listCount(), baseCount, "Back to the month count once the next-week row is gone.");
     // A failing deadline load keeps the team events and says why.
     failDeadlines = true;
     await page.getByRole("button", { name: "다음 달", exact: true }).click();
