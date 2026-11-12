@@ -38,6 +38,13 @@ function loadWeekBlocks() {
   vm.runInNewContext(ts.transpileModule(wbSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, box);
   return box.module.exports;
 }
+function loadPlain(name) {
+  const src = fs.readFileSync(path.resolve(__dirname, `../src/lib/${name}.ts`), "utf8");
+  const box = { exports: {}, module: { exports: {} }, require: (dep) => { throw new Error(`unexpected import ${dep}`); } };
+  box.exports = box.module.exports;
+  vm.runInNewContext(ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, box);
+  return box.module.exports;
+}
 const sandbox = {
   exports: {},
   module: { exports: {} },
@@ -45,6 +52,7 @@ const sandbox = {
   require: (name) => {
     if (name === "@/lib/supabase/client") return { createClient: () => fakeClient() };
     if (name === "@/lib/week-blocks") return loadWeekBlocks();
+    if (name === "@/lib/week-view") return loadPlain("week-view");
     throw new Error(`unexpected import ${name}`);
   },
 };
@@ -105,6 +113,22 @@ assert.deepEqual(Array.from(groups[1].deadlines, (x) => x.id), ["a1", "a2"]);
 assert.equal(groups[1].project_name, "name-A");
 assert.equal(pd.groupDeadlinesByProject([]).length, 0);
 
+// D12: only deadlines of this week (Mon~Sun), input untouched. 2026-11-12 is a Thursday.
+const weekInput = [
+  d("prev-sun", "A", "2026-11-08"),
+  d("mon", "A", "2026-11-09"),
+  d("thu", "B", "2026-11-12", true),
+  d("sun", "B", "2026-11-15"),
+  d("next-mon", "A", "2026-11-16"),
+];
+const weekCopy = JSON.stringify(weekInput);
+assert.deepEqual(Array.from(pd.deadlinesInWeek(weekInput, "2026-11-12"), (x) => x.id), ["mon", "thu", "sun"]);
+assert.equal(JSON.stringify(weekInput), weekCopy, "Input is not mutated.");
+// Sunday belongs to the week that started the Monday before.
+assert.deepEqual(Array.from(pd.deadlinesInWeek(weekInput, "2026-11-15"), (x) => x.id), ["mon", "thu", "sun"]);
+assert.deepEqual(Array.from(pd.deadlinesInWeek(weekInput, "2026-11-16"), (x) => x.id), ["next-mon"]);
+assert.equal(pd.deadlinesInWeek([], "2026-11-12").length, 0);
+
 // The hub keeps its project array when a background refresh returns the same rows.
 const listSource = fs.readFileSync(path.resolve(__dirname, "../src/lib/project-list.ts"), "utf8");
 const listBox = { exports: {}, module: { exports: {} }, require: (name) => { throw new Error(`unexpected import ${name}`); } };
@@ -142,7 +166,7 @@ assert.equal(sameProjects([], []), true);
   // Other errors still throw.
   responses = [{ data: null, error: { code: "500", message: "boom" } }];
   await assert.rejects(pd.listProjectDeadlines("2026-11-01", "2026-11-30"), /boom/);
-  console.log("PASS: project tone map avoids clashes and is stable, deadline groups by project, same-list check, kind=todo filter with missing-column refetch.");
+  console.log("PASS: project tone map avoids clashes and is stable, deadline groups by project, this-week filter, same-list check, kind=todo filter with missing-column refetch.");
 })().catch((err) => {
   console.error(err);
   process.exit(1);

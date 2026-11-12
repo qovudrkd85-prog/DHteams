@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   CalendarDays,
   Lock,
@@ -66,6 +66,29 @@ const message = (error: unknown) =>
     : "일정을 처리하지 못했습니다. 다시 시도해 주세요.";
 type Editor = { original?: DepartmentEvent; input: DepartmentEventInput };
 
+// Only these creator choices are remembered: a member id means nothing once the team changes.
+const CREATOR_KEY = "dh-teams:calendar-creator";
+const REMEMBERED_CREATORS = ["mine", "all", "unassigned"];
+
+function readStoredCreator(): string {
+  try {
+    const stored = window.localStorage.getItem(CREATOR_KEY);
+    return stored !== null && REMEMBERED_CREATORS.includes(stored) ? stored : "all";
+  } catch {
+    return "all";
+  }
+}
+
+function writeStoredCreator(value: string) {
+  try {
+    window.localStorage.setItem(CREATOR_KEY, REMEMBERED_CREATORS.includes(value) ? value : "all");
+  } catch {
+    // The choice stays for this visit only.
+  }
+}
+
+const subscribeNothing = () => () => {};
+
 function CreatorBadge({
   name,
   color,
@@ -130,6 +153,18 @@ export function DepartmentCalendar({
   const [seenFocus, setSeenFocus] = useState<string | null>(null);
   const [seenFocusDate, setSeenFocusDate] = useState<string | null>(null);
   const [creatorFilter, setCreatorFilter] = useState("all");
+  // Server render (and hydration) sees null; the stored choice is applied once on the client.
+  const storedCreator = useSyncExternalStore(subscribeNothing, readStoredCreator, () => null);
+  const [creatorRestored, setCreatorRestored] = useState(false);
+  if (!creatorRestored && storedCreator !== null && !fixedScope) {
+    setCreatorRestored(true);
+    // A project link opens on "all"; do not let the remembered choice hide its deadlines.
+    if (!focusProject && storedCreator !== "all") setCreatorFilter(storedCreator);
+  }
+  const chooseCreator = (value: string) => {
+    setCreatorFilter(value);
+    if (!fixedScope) writeStoredCreator(value);
+  };
   const [scopeFilter, setScopeFilter] = useState<"all" | EventVisibility>(fixedScope ?? "team");
   if (focusProject && focusProject !== seenFocus && !fixedScope) {
     // Show only that project's deadlines; other filters would hide them.
@@ -572,7 +607,7 @@ export function DepartmentCalendar({
             id="event-creator-filter"
             className="h-8 max-w-48 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700"
             value={activeCreatorFilter}
-            onChange={(event) => setCreatorFilter(event.target.value)}
+            onChange={(event) => chooseCreator(event.target.value)}
           >
             <option value="all">전체 등록자</option>
             <option value="mine" disabled={!currentMember}>
@@ -592,7 +627,7 @@ export function DepartmentCalendar({
               onClick={() => {
                 setFilter("all");
                 setProjectFilter("all");
-                setCreatorFilter("all");
+                chooseCreator("all");
                 setScopeFilter(defaultScope);
               }}
             >

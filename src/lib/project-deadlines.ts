@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/client";
 import type { Schedule, StickyColor } from "@/lib/types";
 import { isTodo } from "@/lib/week-blocks";
+import { shiftWeek, weekStart } from "@/lib/week-view";
 
 /**
  * A project schedule as the team calendar shows it: a deadline that links back to its project.
@@ -169,6 +170,13 @@ export function groupDeadlinesByProject(deadlines: readonly ProjectDeadline[]): 
     else groups.set(deadline.project_id, { project_id: deadline.project_id, project_name: deadline.project_name, deadlines: [deadline] });
   }
   return Array.from(groups.values());
+}
+
+/** Deadlines due in the Monday~Sunday week that holds `today` (a new array; input order kept). */
+export function deadlinesInWeek(deadlines: readonly ProjectDeadline[], today: string): ProjectDeadline[] {
+  const first = weekStart(today);
+  const next = shiftWeek(first, 1);
+  return deadlines.filter((deadline) => deadline.due_date >= first && deadline.due_date < next);
 }
 
 /** Whole days from `today` to `due` (both YYYY-MM-DD); negative when overdue. */

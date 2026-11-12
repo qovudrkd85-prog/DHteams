@@ -63,7 +63,7 @@ const deferred = () => {
       const url = new URL(route.request().url());
       return url.origin === new URL(baseURL).origin ? route.continue() : route.abort();
     });
-    await installAccountMock(context, { members: [{ id: "11111111-1111-4111-8111-111111111111", name: "김담당", role: "설계", avatar: "🧑‍💻", color: "#547867", created_at: today }] });
+    const accountState = await installAccountMock(context, { members: [{ id: "11111111-1111-4111-8111-111111111111", name: "김담당", role: "설계", avatar: "🧑‍💻", color: "#547867", created_at: today }] });
     await page.route("**/rest/v1/**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -567,6 +567,7 @@ const deferred = () => {
     const quick = Array.isArray(schedulePosts[0]) ? schedulePosts[0][0] : schedulePosts[0];
     assert.equal(quick.due_date, thu);
     assert.equal(quick.title, "측량 준비");
+    assert.equal(quick.assignee, "김담당", "D12: quick add fills my name as assignee.");
     assert.ok(!("kind" in quick) && !("sort_order" in quick), `D8 posts no block columns: ${Object.keys(quick).join(",")}`);
     assert.equal(await page.getByRole("dialog").count(), 0, "Quick add opens no dialog.");
     assert.equal(await thuAdd.inputValue(), "");
@@ -922,8 +923,23 @@ const deferred = () => {
     assert.equal(schedulePosts.length, postCount + 1);
     assert.equal(lastPost().title, "/");
     assert.ok(!("kind" in lastPost()), "No kind key without the column.");
+
+    // D12: when my account name cannot be read, quick add posts assignee null.
+    const me = accountState.account.member;
+    const savedName = me.name;
+    delete me.name;
+    await page.goto(`${baseURL}/projects/p1`);
+    await openSchedule();
+    await satAdd.waitFor();
+    postCount = schedulePosts.length;
+    await satAdd.fill("이름 없는 추가");
+    await satAdd.press("Enter");
+    await rowOf(satCell, "이름 없는 추가").waitFor();
+    assert.equal(schedulePosts.length, postCount + 1);
+    assert.equal(lastPost().assignee, null, "No readable name: assignee is null.");
+    me.name = savedName;
     assert.deepEqual(errors, []);
-    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height (all on the fallback editor); D7 memo items fold/author/add without author fields/esc/edit conflict/delete undo/peer refresh; D8 week toggle/remembered view/done fold/quick add/toggle/rename conflict/delete undo/week nav/peer refresh/phone stack; D9 block rows off the month grid/count, week board in sort_order; D10 block kinds/shortcuts (add and edit)/sticky list kinds/number labels/blocks off the month view/insert between lines/PGRST204 retry/no-column fallback; D11 slash menu open/filter/↑↓ wrap/Enter pick without POST/Esc keeps text/no match/mid-text/mouse pick/edit input/390px/no-column plain text.");
+    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height (all on the fallback editor); D7 memo items fold/author/add without author fields/esc/edit conflict/delete undo/peer refresh; D8 week toggle/remembered view/done fold/quick add/toggle/rename conflict/delete undo/week nav/peer refresh/phone stack; D9 block rows off the month grid/count, week board in sort_order; D10 block kinds/shortcuts (add and edit)/sticky list kinds/number labels/blocks off the month view/insert between lines/PGRST204 retry/no-column fallback; D11 slash menu open/filter/↑↓ wrap/Enter pick without POST/Esc keeps text/no match/mid-text/mouse pick/edit input/390px/no-column plain text; D12 quick add assignee = my name / null without a name.");
   } finally {
     await browser.close();
   }

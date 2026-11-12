@@ -299,6 +299,38 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await page.locator(`button[aria-label="${today} 일정 보기"]`).click();
     await page.getByRole("button", { name: "전체", exact: true }).click();
     await page.locator('button[title^="회의 · 부서 주간회의 ·"]').first().waitFor();
+    // D12: rows show the assignee name; [이달|이번 주] sits next to the open header and narrows the list.
+    assert.ok((await monthList.locator('[data-deadline-row="s1"] [data-deadline-assignee]').innerText()).includes("김민수"), "The assignee name is shown.");
+    assert.equal(await monthList.locator('[data-deadline-row="s4"] [data-deadline-assignee]').count(), 0, "No assignee, no name.");
+    assert.equal(await monthList.locator("button[aria-expanded] button").count(), 0, "The toggle is not inside the header button.");
+    const todayUtc = new Date(`${today}T00:00:00Z`);
+    const nextMonday = new Date(todayUtc.getTime() + (7 - ((todayUtc.getUTCDay() + 6) % 7)) * 86400000).toISOString().slice(0, 10);
+    // Near the month end next Monday is in the next month and never in this list; the toggle is still checked.
+    const nextWeekInMonth = nextMonday.slice(0, 7) === today.slice(0, 7);
+    if (nextWeekInMonth) {
+      schedules.push({ id: "s11", project_id: "p3", title: "다음 주 현장 회의", due_date: nextMonday, assignee: "이지은", note: null, color: "green", done: false, created_at: stamp(), deleted_at: null, projects: { name: "후포지구 풍수해생활권", code: "2026-03", deleted_at: null } });
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await monthList.locator('[data-deadline-row="s11"]').waitFor();
+    }
+    const rangeButton = (name) => monthList.getByRole("button", { name, exact: true });
+    const listCount = () => monthList.getByTestId("month-deadline-count").innerText();
+    assert.equal(await rangeButton("이달").getAttribute("aria-pressed"), "true");
+    const monthCount = await listCount();
+    await rangeButton("이번 주").click();
+    await monthList.locator('[data-deadline-range="week"][aria-pressed="true"]').waitFor();
+    if (nextWeekInMonth) await monthList.locator('[data-deadline-row="s11"]').waitFor({ state: "detached" });
+    await monthList.locator('[data-deadline-row="s1"]').waitFor();
+    const weekCount = await listCount();
+    assert.ok(weekCount.includes("이번 주"), weekCount);
+    assert.notEqual(weekCount, monthCount, "The count follows the toggle.");
+    await rangeButton("이달").click();
+    if (nextWeekInMonth) {
+      await monthList.locator('[data-deadline-row="s11"]').waitFor();
+      schedules.pop();
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await monthList.locator('[data-deadline-row="s11"]').waitFor({ state: "detached" });
+    }
+    assert.equal(await listCount(), monthCount);
     // A failing deadline load keeps the team events and says why.
     failDeadlines = true;
     await page.getByRole("button", { name: "다음 달", exact: true }).click();
@@ -323,7 +355,18 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.equal(await calendar.getByRole("heading", { name: /^\d{4}\. \d{2}$/ }).textContent(), viewedMonth);
     assert.equal(await page.getByRole("button", { name: "업무", exact: true }).getAttribute("aria-pressed"), "true");
     assert.equal(await page.getByLabel("등록자", { exact: true }).inputValue(), "mine");
+    // D12: "내 일정" is remembered across a reload; a stored value that is not an option means all.
+    assert.equal(await page.evaluate(() => localStorage.getItem("dh-teams:calendar-creator")), "mine");
+    await page.reload();
+    await openCalendar();
+    assert.equal(await page.getByLabel("등록자", { exact: true }).inputValue(), "mine");
+    await page.evaluate((id) => localStorage.setItem("dh-teams:calendar-creator", id), members[1].id);
+    await page.reload();
+    await openCalendar();
+    assert.equal(await page.getByLabel("등록자", { exact: true }).inputValue(), "all");
+    await page.getByLabel("등록자", { exact: true }).selectOption("mine");
     await page.getByRole("button", { name: "필터 초기화", exact: true }).click();
+    assert.equal(await page.evaluate(() => localStorage.getItem("dh-teams:calendar-creator")), "all", "Reset is remembered too.");
     await page.getByRole("button", { name: "오늘", exact: true }).click();
     await page.getByRole("button", { name: "회의 부서 주간회의", exact: false }).waitFor();
     // Escape closes only the inner editor; focus returns to the calendar.
@@ -540,6 +583,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     await calendar.locator('span[data-layer="private"]:visible').first().waitFor({ state: "detached" });
     // Phones keep the month list folded until asked.
     assert.equal(await calendar.getByTestId("month-deadline-list").locator("button[aria-expanded]").getAttribute("aria-expanded"), "false");
+    assert.equal(await calendar.getByTestId("month-deadline-list").locator("[data-deadline-range]").count(), 0, "No range toggle while folded.");
     await openCalendar();
     await page
       .getByRole("button", { name: "회의 부서 주간회의", exact: false })
@@ -604,7 +648,7 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
     assert.notEqual(await page.getByRole("button", { name: "과업 마감", exact: true }).getAttribute("aria-pressed"), "true");
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: inline team calendar, month/filters kept across tabs, nested editor focus, search/navigation links, project D-n badges, legend and project chips, team isolation, team-first scope, month project list, layer shapes, project focus link, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
+      "PASS: inline team calendar, month/filters kept across tabs, nested editor focus, search/navigation links, project D-n badges, legend and project chips, team isolation, team-first scope, month project list, D12 week toggle/assignee names/remembered 내 일정, layer shapes, project focus link, account-authored work, combined member/category filters, immutable creator and legacy authorship, create/edit/reload/delete/undo across month navigation, concurrency conflict, save/schema failures, year boundary, mobile overflow, missing table. Mock writes:",
       writes,
     );
   } finally {

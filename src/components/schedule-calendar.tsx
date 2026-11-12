@@ -5,6 +5,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { useAccount } from "@/components/account/provider";
 import { MonthMemo } from "@/components/month-memo";
 import { ScheduleWeek, useScheduleView } from "@/components/schedule-week";
 import { Button } from "@/components/ui/button";
@@ -107,6 +108,8 @@ export function ScheduleCalendar({
   const [showAllTodo, setShowAllTodo] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [view, setView] = useScheduleView();
+  // Quick-add rows default to my name as assignee (same source as the team workspace).
+  const myName = useAccount().account?.member.name ?? null;
   const [weekStartKey, setWeekStartKey] = useState(() => weekStart(toKey(new Date())));
 
   // Request number: a late response from an older load is dropped.
@@ -241,7 +244,7 @@ export function ScheduleCalendar({
     }
   }
 
-  // Week board quick add: title and date only; detail fields stay empty. Block kind and
+  // Week board quick add: title and date, assignee = my name; other detail fields stay empty. Block kind and
   // sort_order go in only when the column exists; a rejection for it retries as a plain to-do.
   async function addQuick(
     day: string,
@@ -250,7 +253,7 @@ export function ScheduleCalendar({
   ): Promise<Schedule | null> {
     mutating.current++;
     try {
-      const base = { title, due_date: day, assignee: null, note: null, color: "yellow" as const };
+      const base = { title, due_date: day, assignee: myName, note: null, color: "yellow" as const };
       const withBlock = blocksReady && block ? { ...base, ...block } : null;
       let created: Schedule;
       try {
