@@ -70,3 +70,41 @@ export function numberLabels(items: readonly KindLike[]): (number | null)[] {
 export function stickyKind(kind: BlockKind): BlockKind {
   return kind === "bullet" || kind === "number" ? kind : "todo";
 }
+
+// ------------------------------------------------------------ "/" block menu (D11)
+
+export interface BlockMenuItem {
+  kind: BlockKind;
+  label: string;
+  /** English aliases matched by prefix, lower case. */
+  aliases: readonly string[];
+}
+
+export const BLOCK_MENU: readonly BlockMenuItem[] = [
+  { kind: "todo", label: "할 일 목록", aliases: ["todo"] },
+  { kind: "text", label: "텍스트", aliases: ["text"] },
+  { kind: "h1", label: "제목1", aliases: ["h1"] },
+  { kind: "h2", label: "제목2", aliases: ["h2"] },
+  { kind: "h3", label: "제목3", aliases: ["h3"] },
+  { kind: "bullet", label: "글머리 기호 목록", aliases: ["bullet"] },
+  { kind: "number", label: "번호 매기기 목록", aliases: ["num", "number"] },
+];
+
+/** Menu items whose label contains the query or whose alias starts with it (case-insensitive). */
+export function filterMenu(query: string): BlockMenuItem[] {
+  const q = query.trim().toLowerCase();
+  return BLOCK_MENU.filter(
+    (item) => item.label.toLowerCase().includes(q) || item.aliases.some((alias) => alias.startsWith(q)),
+  );
+}
+
+/** Next highlighted index after ↑ (-1) or ↓ (+1), wrapping at both ends. */
+export function moveIndex(index: number, delta: number, count: number): number {
+  if (count <= 0) return 0;
+  return (((index + delta) % count) + count) % count;
+}
+
+/** Filter text after a "/" typed at the very start of the input, else null (menu closed). */
+export function slashQuery(value: string): string | null {
+  return value.startsWith("/") ? value.slice(1) : null;
+}

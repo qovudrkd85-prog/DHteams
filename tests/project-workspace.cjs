@@ -806,6 +806,84 @@ const deferred = () => {
     await sunInsert.press("Escape");
     await sunInsert.waitFor({ state: "hidden" });
 
+    // D11: "/" at the start of an empty input opens the block menu; it only picks the kind.
+    const blockMenu = board.getByRole("listbox", { name: "블록 종류", exact: true });
+    const menuOptions = blockMenu.getByRole("option");
+    postCount = schedulePosts.length;
+    await satAdd.fill("");
+    await satAdd.focus();
+    await page.keyboard.type("/");
+    await blockMenu.waitFor();
+    assert.equal(await menuOptions.count(), 7, "Seven block kinds.");
+    assert.equal(await menuOptions.first().getAttribute("aria-selected"), "true", "First item highlighted.");
+    assert.equal(
+      await satAdd.getAttribute("aria-activedescendant"),
+      await menuOptions.first().getAttribute("id"),
+      "The input points at the highlighted option.",
+    );
+    await satAdd.fill("/제목");
+    assert.equal(await menuOptions.count(), 3, "Filtered by the typed text.");
+    await satAdd.press("ArrowDown");
+    assert.equal(await menuOptions.nth(1).getAttribute("aria-selected"), "true");
+    await satAdd.press("Enter");
+    await blockMenu.waitFor({ state: "hidden" });
+    assert.equal(await satAdd.inputValue(), "", "The /text is removed.");
+    assert.equal(await satAdd.getAttribute("placeholder"), "제목2");
+    assert.equal(schedulePosts.length, postCount, "Enter on the open menu creates no line.");
+    await satAdd.fill("보고서");
+    await satAdd.press("Enter");
+    await kindRow(satCell, "h2", "보고서").waitFor();
+    assert.equal(schedulePosts.length, postCount + 1);
+    assert.equal(lastPost().kind, "h2");
+    assert.equal(lastPost().title, "보고서");
+    // ↑ from the first item wraps to the last.
+    await satAdd.fill("/");
+    await blockMenu.waitFor();
+    await satAdd.press("ArrowUp");
+    assert.equal(await menuOptions.nth(6).getAttribute("aria-selected"), "true", "↑ wraps around.");
+    // Esc closes the menu and keeps the text.
+    await satAdd.press("Escape");
+    await blockMenu.waitFor({ state: "hidden" });
+    assert.equal(await satAdd.inputValue(), "/");
+    // No match: no menu. Text before "/": no menu.
+    await satAdd.fill("/zz");
+    assert.equal(await blockMenu.count(), 0, "No menu without a match.");
+    await satAdd.fill("가/");
+    assert.equal(await blockMenu.count(), 0, "No menu when / is not at the start.");
+    // Mouse click picks and keeps focus in the input.
+    await satAdd.fill("/");
+    await blockMenu.getByRole("option", { name: "글머리 기호 목록", exact: true }).click();
+    await blockMenu.waitFor({ state: "hidden" });
+    assert.equal(await satAdd.getAttribute("data-draft-kind"), "bullet");
+    assert.equal(await satAdd.inputValue(), "");
+    assert.equal(await satAdd.evaluate((el) => el === document.activeElement), true, "Focus stays in the input.");
+    await satAdd.press("Backspace");
+    assert.equal(await satAdd.getAttribute("data-draft-kind"), "todo");
+    assert.equal(schedulePosts.length, postCount + 1, "Menu actions post nothing.");
+    // Edit input: "/" on an emptied line picks the kind too; Esc then cancels the edit (no PATCH).
+    const patchCount = schedulePatches.length;
+    await kindRow(satCell, "h2", "보고서").getByRole("button", { name: "보고서", exact: true }).click();
+    await rowEdit.fill("/텍");
+    await blockMenu.waitFor();
+    assert.equal(await menuOptions.count(), 1);
+    await rowEdit.press("Enter");
+    await blockMenu.waitFor({ state: "hidden" });
+    assert.equal(await rowEdit.getAttribute("data-draft-kind"), "text");
+    assert.equal(await rowEdit.inputValue(), "");
+    await rowEdit.press("Escape");
+    await rowEdit.waitFor({ state: "hidden" });
+    assert.equal(schedulePatches.length, patchCount, "Esc after a menu pick saves nothing.");
+    // Phone width: the menu stays on screen.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await satAdd.fill("/");
+    await blockMenu.waitFor();
+    await blockMenu.scrollIntoViewIfNeeded();
+    const menuBox = await blockMenu.boundingBox();
+    assert.ok(menuBox && menuBox.x >= 0 && menuBox.x + menuBox.width <= 390, `Menu inside 390px: ${JSON.stringify(menuBox)}`);
+    await satAdd.press("Escape");
+    await satAdd.fill("");
+    await page.setViewportSize({ width: 1440, height: 1080 });
+
     // 7a. Insert rejected for a missing column (PGRST204): saved again without kind/sort_order, as a to-do.
     failKindPost = true;
     postCount = schedulePosts.length;
@@ -832,8 +910,20 @@ const deferred = () => {
     await rowEdit.press("Enter");
     await rowEdit.waitFor({ state: "hidden" });
     assert.equal(await sunInsert.count(), 0, "No in-between draft without the kind column.");
+    // D11 without the kind column: "/" is plain text, no menu, Enter saves it as typed.
+    postCount = schedulePosts.length;
+    await satAdd.fill("");
+    await satAdd.focus();
+    await page.keyboard.type("/");
+    assert.equal(await blockMenu.count(), 0, "No block menu without the kind column.");
+    assert.equal(await satAdd.inputValue(), "/");
+    await satAdd.press("Enter");
+    await satCell.getByRole("button", { name: "/", exact: true }).waitFor();
+    assert.equal(schedulePosts.length, postCount + 1);
+    assert.equal(lastPost().title, "/");
+    assert.ok(!("kind" in lastPost()), "No kind key without the column.");
     assert.deepEqual(errors, []);
-    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height (all on the fallback editor); D7 memo items fold/author/add without author fields/esc/edit conflict/delete undo/peer refresh; D8 week toggle/remembered view/done fold/quick add/toggle/rename conflict/delete undo/week nav/peer refresh/phone stack; D9 block rows off the month grid/count, week board in sort_order; D10 block kinds/shortcuts (add and edit)/sticky list kinds/number labels/blocks off the month view/insert between lines/PGRST204 retry/no-column fallback.");
+    console.log("PASS: cleared log actor, failed log drafts/retry and checkbox rollback, memo month switching/loading, ordered saves/retry, restored schedule refresh, day cell 3-cap fold, month todo open/done fold, focus refresh adds a peer schedule and skips while editing, schedule toggle-then-edit/conflict/no-column/deleted, memo idle refresh, memo conflict keep-mine/use-peer/kept across month switch, capped memo height (all on the fallback editor); D7 memo items fold/author/add without author fields/esc/edit conflict/delete undo/peer refresh; D8 week toggle/remembered view/done fold/quick add/toggle/rename conflict/delete undo/week nav/peer refresh/phone stack; D9 block rows off the month grid/count, week board in sort_order; D10 block kinds/shortcuts (add and edit)/sticky list kinds/number labels/blocks off the month view/insert between lines/PGRST204 retry/no-column fallback; D11 slash menu open/filter/↑↓ wrap/Enter pick without POST/Esc keeps text/no match/mid-text/mouse pick/edit input/390px/no-column plain text.");
   } finally {
     await browser.close();
   }

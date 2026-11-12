@@ -5,6 +5,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   useSyncExternalStore,
@@ -17,12 +18,16 @@ import { isOverdue } from "@/lib/schedule-view";
 import type { Schedule, ScheduleKind, StickyColor } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
+  filterMenu,
   isTodo,
+  moveIndex,
   nextOrder,
   numberLabels,
   orderBetween,
   parseShortcut,
+  slashQuery,
   stickyKind,
+  type BlockMenuItem,
 } from "@/lib/week-blocks";
 import { shouldHandleKey } from "@/lib/week-view";
 
@@ -130,6 +135,8 @@ interface ScheduleWeekProps {
 
 type RowEdit = { id: string; draft: string; kind: ScheduleKind };
 type InsertDraft = Draft & { day: string; after: string };
+/** "/" block menu of one input (D11): which input, highlighted index, closed by Esc. */
+type MenuState = { key: string; index: number; closed: boolean };
 
 export function ScheduleWeek({
   days,
@@ -154,6 +161,8 @@ export function ScheduleWeek({
   const insertRef = useRef<InsertDraft | null>(null);
   const inserting = useRef(false);
   const todayRef = useRef<HTMLElement | null>(null);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const menuId = useId();
 
   // Phone: jump to today's day in the stacked list.
   useEffect(() => {
@@ -189,6 +198,104 @@ export function ScheduleWeek({
   };
   const setDraft = (day: string, next: Draft) => setDrafts((prev) => ({ ...prev, [day]: next }));
 
+  // ---- "/" block menu (D11): only with the kind column, only for "/..." at the start of the input.
+  const menuItems = (key: string, text: string): BlockMenuItem[] => {
+    if (!blocksReady || menu?.key !== key || menu.closed) return [];
+    const query = slashQuery(text);
+    return query === null ? [] : filterMenu(query);
+  };
+  const activeIndex = (count: number) => Math.min(menu?.index ?? 0, Math.max(count - 1, 0));
+  // Typing re-opens the menu for this input at the first item.
+  const touchMenu = (key: string) => setMenu({ key, index: 0, closed: false });
+  const leaveMenu = (key: string) => setMenu((prev) => (prev?.key === key ? null : prev));
+
+  /** ↑↓ Enter Esc go to the open menu first; true when the key was used. */
+  function menuKey(
+    event: KeyboardEvent<HTMLInputElement>,
+    key: string,
+    text: string,
+  ): boolean {
+    const items = menuItems(key, text);
+    if (!menu || items.length === 0) return false;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      setMenu({ ...menu, index: moveIndex(activeIndex(items.length), delta, items.length) });
+      return true;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      setMenu(null);
+      pickKind(key, items[activeIndex(items.length)].kind);
+      return true;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setMenu({ ...menu, closed: true });
+      return true;
+    }
+    return false;
+  }
+
+  /** aria props for the input and the menu node itself (null when closed). */
+  const menuFor = (key: string, text: string) => {
+    const items = menuItems(key, text);
+    if (items.length === 0) return { inputProps: {}, node: null };
+    const listId = `${menuId}-${key}`;
+    const active = activeIndex(items.length);
+    return {
+      inputProps: {
+        "aria-controls": listId,
+        "aria-activedescendant": `${listId}-${items[active].kind}`,
+      },
+      // In the flow (not absolute): day columns scroll (overflow-y-auto) and would clip a floating menu.
+      // mousedown keeps focus in the input so blur does not close the menu or save first.
+      node: (
+        <ul
+          id={listId}
+          role="listbox"
+          aria-label="블록 종류"
+          className="mt-0.5 max-h-60 w-full overflow-y-auto rounded-md border bg-popover p-0.5 text-xs text-popover-foreground shadow-md"
+        >
+          {items.map((menuItem, i) => (
+            <li
+              key={menuItem.kind}
+              id={`${listId}-${menuItem.kind}`}
+              role="option"
+              aria-selected={i === active}
+              data-kind={menuItem.kind}
+              className={cn("cursor-pointer truncate rounded px-1.5 py-1", i === active && "bg-accent")}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setMenu(null);
+                pickKind(key, menuItem.kind);
+              }}
+            >
+              {menuItem.label}
+            </li>
+          ))}
+        </ul>
+      ),
+    };
+  };
+  const ADD_MENU = "add-";
+  const EDIT_MENU = "edit-";
+  const INSERT_MENU_KEY = "insert";
+  const addMenuKey = (day: string) => `${ADD_MENU}${day}`;
+  const editMenuKey = (id: string) => `${EDIT_MENU}${id}`;
+  /** A picked kind replaces the "/text" of that input (reuses the D10 kind-change path). */
+  function pickKind(key: string, kind: ScheduleKind) {
+    if (key === INSERT_MENU_KEY) {
+      const now = insertRef.current;
+      if (now) setInsert({ ...now, kind, text: "" });
+    } else if (key.startsWith(EDIT_MENU)) {
+      const now = editRef.current;
+      if (now) setEdit({ ...now, kind, draft: "" });
+    } else if (key.startsWith(ADD_MENU)) {
+      setDraft(key.slice(ADD_MENU.length), { kind, text: "" });
+    }
+  }
+
   async function commitEdit(source: "enter" | "blur") {
     const current = editRef.current;
     if (!current || saving.current) return;
@@ -223,6 +330,8 @@ export function ScheduleWeek({
 
   function onEditKey(event: KeyboardEvent<HTMLInputElement>) {
     if (!shouldHandleKey(event.nativeEvent)) return;
+    const now = editRef.current;
+    if (now && menuKey(event, editMenuKey(now.id), now.draft)) return;
     if (event.key === "Escape") {
       event.preventDefault();
       setEdit(null);
@@ -246,6 +355,7 @@ export function ScheduleWeek({
   async function onAddKey(day: string, event: KeyboardEvent<HTMLInputElement>) {
     if (!shouldHandleKey(event.nativeEvent)) return;
     const draft = drafts[day] ?? EMPTY_DRAFT;
+    if (menuKey(event, addMenuKey(day), draft.text)) return;
     if (event.key === "Backspace") {
       if (draft.text === "" && draft.kind !== "todo") {
         event.preventDefault();
@@ -275,6 +385,7 @@ export function ScheduleWeek({
     if (!shouldHandleKey(event.nativeEvent)) return;
     const current = insertRef.current;
     if (!current || inserting.current) return;
+    if (menuKey(event, INSERT_MENU_KEY, current.text)) return;
     if (event.key === "Escape") {
       event.preventDefault();
       setInsert(null);
@@ -324,44 +435,62 @@ export function ScheduleWeek({
   const renderInsert = (day: string) => {
     const current = insert;
     if (!current) return null;
+    const slash = menuFor(INSERT_MENU_KEY, current.text);
     return (
-      <Input
-        key={`insert-${current.after}`}
-        autoFocus
-        data-insert-draft=""
-        data-draft-kind={current.kind}
-        aria-label={`${day} 줄 사이 추가`}
-        placeholder={placeholderOf(current.kind)}
-        maxLength={200}
-        className="h-10 px-1.5 text-xs sm:h-7"
-        value={current.text}
-        onChange={(e) => {
-          const now = insertRef.current;
-          if (now) setInsert({ ...now, ...readInput(e.target.value, now.kind) });
-        }}
-        onKeyDown={(e) => void onInsertKey(e)}
-        onBlur={onInsertBlur}
-      />
+      <div key={`insert-${current.after}`}>
+        <Input
+          autoFocus
+          data-insert-draft=""
+          data-draft-kind={current.kind}
+          aria-label={`${day} 줄 사이 추가`}
+          placeholder={placeholderOf(current.kind)}
+          maxLength={200}
+          className="h-10 px-1.5 text-xs sm:h-7"
+          value={current.text}
+          {...slash.inputProps}
+          onChange={(e) => {
+            const now = insertRef.current;
+            touchMenu(INSERT_MENU_KEY);
+            if (now) setInsert({ ...now, ...readInput(e.target.value, now.kind) });
+          }}
+          onKeyDown={(e) => void onInsertKey(e)}
+          onBlur={() => {
+            leaveMenu(INSERT_MENU_KEY);
+            onInsertBlur();
+          }}
+        />
+        {slash.node}
+      </div>
     );
   };
 
-  const renderEditInput = (item: Schedule, edit: RowEdit) => (
+  const renderEditInput = (item: Schedule, edit: RowEdit) => {
+    const slash = menuFor(editMenuKey(item.id), edit.draft);
+    return (
     <>
-      <Input
-        autoFocus
-        aria-label="할 일 고치기"
-        data-draft-kind={edit.kind}
-        placeholder={placeholderOf(edit.kind)}
-        maxLength={200}
-        className="h-7 min-w-0 flex-1 px-1 text-xs"
-        value={edit.draft}
-        onChange={(e) => {
-          const next = readInput(e.target.value, edit.kind);
-          setEdit({ id: item.id, draft: next.text, kind: next.kind });
-        }}
-        onKeyDown={onEditKey}
-        onBlur={() => void commitEdit("blur")}
-      />
+      <div className="min-w-0 flex-1">
+        <Input
+          autoFocus
+          aria-label="할 일 고치기"
+          data-draft-kind={edit.kind}
+          placeholder={placeholderOf(edit.kind)}
+          maxLength={200}
+          className="h-7 min-w-0 px-1 text-xs"
+          value={edit.draft}
+          {...slash.inputProps}
+          onChange={(e) => {
+            const next = readInput(e.target.value, edit.kind);
+            touchMenu(editMenuKey(item.id));
+            setEdit({ id: item.id, draft: next.text, kind: next.kind });
+          }}
+          onKeyDown={onEditKey}
+          onBlur={() => {
+            leaveMenu(editMenuKey(item.id));
+            void commitEdit("blur");
+          }}
+        />
+        {slash.node}
+      </div>
       {/* mousedown keeps focus in the input so blur does not save first. Detail is for to-dos only. */}
       {isTodo(item) ? (
         <button
@@ -391,7 +520,8 @@ export function ScheduleWeek({
         <Trash2 className="size-3.5" />
       </button>
     </>
-  );
+    );
+  };
 
   const startEdit = (item: Schedule) => setEdit({ id: item.id, draft: item.title, kind: kindOf(item) });
 
@@ -478,6 +608,7 @@ export function ScheduleWeek({
           const labels = numberLabels(rows);
           const draft = drafts[day] ?? EMPTY_DRAFT;
           const draftKind = blocksReady ? draft.kind : "todo";
+          const slash = menuFor(addMenuKey(day), draft.text);
           return (
             <section
               key={day}
@@ -509,22 +640,28 @@ export function ScheduleWeek({
                     : null}
                 </Fragment>
               ))}
-              <Input
-                aria-label={`${day} 할 일 추가`}
-                data-draft-kind={draftKind}
-                placeholder={placeholderOf(draftKind)}
-                maxLength={200}
-                className="h-10 px-1.5 text-xs sm:h-7"
-                value={draft.text}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setDrafts((prev) => ({
-                    ...prev,
-                    [day]: readInput(value, (prev[day] ?? EMPTY_DRAFT).kind),
-                  }));
-                }}
-                onKeyDown={(e) => void onAddKey(day, e)}
-              />
+              <div>
+                <Input
+                  aria-label={`${day} 할 일 추가`}
+                  data-draft-kind={draftKind}
+                  placeholder={placeholderOf(draftKind)}
+                  maxLength={200}
+                  className="h-10 px-1.5 text-xs sm:h-7"
+                  value={draft.text}
+                  {...slash.inputProps}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    touchMenu(addMenuKey(day));
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [day]: readInput(value, (prev[day] ?? EMPTY_DRAFT).kind),
+                    }));
+                  }}
+                  onKeyDown={(e) => void onAddKey(day, e)}
+                  onBlur={() => leaveMenu(addMenuKey(day))}
+                />
+                {slash.node}
+              </div>
             </section>
           );
         })}

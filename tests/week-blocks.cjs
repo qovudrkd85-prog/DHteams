@@ -92,4 +92,38 @@ assert.equal(wb.stickyKind("bullet"), "bullet");
 assert.equal(wb.stickyKind("number"), "number");
 for (const kind of ["h1", "h2", "h3", "text"]) assert.equal(wb.stickyKind(kind), "todo", kind);
 
-console.log("PASS: week-blocks (isTodo, orderDay stable/immutable, nextOrder, orderBetween, parseShortcut, numberLabels, stickyKind).");
+// D11 "/" block menu: seven kinds in a fixed order, filtered by the text typed after "/".
+assert.deepEqual(plain(wb.BLOCK_MENU.map((item) => item.kind)), ["todo", "text", "h1", "h2", "h3", "bullet", "number"]);
+assert.deepEqual(
+  plain(wb.BLOCK_MENU.map((item) => item.label)),
+  ["할 일 목록", "텍스트", "제목1", "제목2", "제목3", "글머리 기호 목록", "번호 매기기 목록"],
+);
+const menuKinds = (query) => plain(wb.filterMenu(query).map((item) => item.kind));
+assert.equal(wb.filterMenu("").length, 7);
+assert.deepEqual(menuKinds("제목"), ["h1", "h2", "h3"]);
+assert.deepEqual(menuKinds("h2"), ["h2"]);
+assert.deepEqual(menuKinds("H2"), ["h2"], "Aliases ignore case.");
+assert.deepEqual(menuKinds("할"), ["todo"]);
+assert.deepEqual(menuKinds("todo"), ["todo"]);
+assert.deepEqual(menuKinds("text"), ["text"]);
+assert.deepEqual(menuKinds("bullet"), ["bullet"]);
+assert.deepEqual(menuKinds("num"), ["number"]);
+assert.deepEqual(menuKinds("h1"), ["h1"]);
+assert.deepEqual(menuKinds("zz"), []);
+assert.notEqual(wb.filterMenu(""), wb.BLOCK_MENU, "filterMenu returns a new array.");
+
+// moveIndex: ↑↓ wrap around at both ends.
+assert.equal(wb.moveIndex(0, -1, 7), 6);
+assert.equal(wb.moveIndex(6, 1, 7), 0);
+assert.equal(wb.moveIndex(2, 1, 7), 3);
+assert.equal(wb.moveIndex(0, 1, 3), 1);
+assert.equal(wb.moveIndex(0, 1, 0), 0, "No items: stays at 0.");
+
+// slashQuery: only a "/" at the very start opens the menu; the rest is the filter.
+assert.equal(wb.slashQuery("/"), "");
+assert.equal(wb.slashQuery("/제목"), "제목");
+assert.equal(wb.slashQuery("가/"), null);
+assert.equal(wb.slashQuery(""), null);
+assert.equal(wb.slashQuery(" /제목"), null);
+
+console.log("PASS: week-blocks (isTodo, orderDay stable/immutable, nextOrder, orderBetween, parseShortcut, numberLabels, stickyKind, BLOCK_MENU/filterMenu/moveIndex/slashQuery).");
