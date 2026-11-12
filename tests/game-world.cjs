@@ -286,7 +286,8 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     await page.waitForFunction((x) => Number(document.querySelector("[data-testid=team-room-me]")?.getAttribute("data-x")) !== x, phoneStart.x);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), "Walking must not widen the mobile page.");
     await page.screenshot({ path: path.resolve("artifacts", "game-world-mobile.png"), fullPage: true });
-    // Mobile: tap the door, then tap the enter button.
+    // Mobile: let the floor walk finish (a tap on the door while still beside it enters at once), then tap the door, then the enter button.
+    await settled();
     const phoneDoor = await roomPoint(doorSpot.x, doorSpot.y);
     await page.mouse.click(phoneDoor.x, phoneDoor.y);
     await enter.waitFor();
