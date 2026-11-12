@@ -96,7 +96,8 @@ if (!["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname)) throw new E
     await page.keyboard.up("Space");
     await page.waitForFunction(() => window.__airSpans.length >= 2, null, { timeout: 3000 });
     const [longAir, shortAir] = await page.evaluate(() => window.__airSpans);
-    assert.ok(longAir >= 500, `A 300 ms hold should stay up ≥ 0.5 s (got ${Math.round(longAir)} ms).`);
+    // ~0.62 s on flat ground; landing on a higher platform cuts it short, so keep margin.
+    assert.ok(longAir >= 450, `A 300 ms hold should stay up ≥ 0.45 s (got ${Math.round(longAir)} ms).`);
     assert.ok(shortAir < 400, `A 30 ms tap should stay up < 0.4 s (got ${Math.round(shortAir)} ms).`);
 
     // 8. Keys while running never move the hidden walker (arrows included).

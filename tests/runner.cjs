@@ -63,6 +63,10 @@ assert.equal(r.difficultyAt(750), 0.5);
 assert.equal(r.zoneAt(10), "breakwater");
 assert.equal(r.zoneAt(500), "pier");
 assert.equal(r.zoneAt(900), "levee");
+assert.equal(r.zoneAt(299), "breakwater");
+assert.equal(r.zoneAt(300), "pier");
+assert.equal(r.zoneAt(799), "pier");
+assert.equal(r.zoneAt(800), "levee");
 
 // 3. Every gap is jumpable: seeds 1..200, 0..3000 m.
 const ZONE_MIN = { breakwater: 0.9, pier: 1.0, levee: 1.4 };

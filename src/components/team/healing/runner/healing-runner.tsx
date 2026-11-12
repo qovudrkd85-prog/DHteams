@@ -88,7 +88,7 @@ export function HealingRunner({ member, isDay, onResult }: HealingRunnerProps) {
         if (phase === "over") {
           const score = runnerScore(state);
           best = saveRunnerBest(score);
-          panel.textContent = `${Math.floor(state.x)} m · 동전 ${state.coins} · 점수 ${score} (최고 ${best}) · Space/탭으로 다시`;
+          panel.textContent = `${Math.floor(state.x)} m · 동전 ${state.coins}개 · ${score}점 (최고 ${best}점) · Space/탭으로 다시`;
           propsRef.current.onResult?.(runnerResult(state, dateKey));
         } else {
           panel.textContent = PANEL_TEXT[phase];
@@ -102,7 +102,7 @@ export function HealingRunner({ member, isDay, onResult }: HealingRunnerProps) {
         root.dataset.distance = distance;
         root.dataset.coins = String(state.coins);
         root.dataset.best = String(best);
-        hud.textContent = `${distance} m · 동전 ${state.coins} · 최고 ${best}`;
+        hud.textContent = `${distance} m · 동전 ${state.coins} · 최고 ${best}점`;
       }
     };
 
