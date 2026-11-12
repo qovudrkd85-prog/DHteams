@@ -46,8 +46,6 @@ const fitsWidth = (page) => page.evaluate(() => document.documentElement.scrollW
       state.requests.push({ table: "team_attendance", method: "POST", body });
       return route.fulfill({ json: row });
     });
-    // The garage healing walk is always open and asks for the weather; keep it local.
-    await page.route("https://api.open-meteo.com/**", (route) => route.fulfill({ json: { current: { weather_code: 0, is_day: 1, temperature_2m: 18 } } }));
     let statusWrites = 0;
     page.on("request", (request) => { if (request.url().includes("/api/account/status") && request.method() === "PATCH") statusWrites++; });
     await page.goto(baseURL, { waitUntil: "domcontentloaded" });
@@ -61,7 +59,7 @@ const fitsWidth = (page) => page.evaluate(() => document.documentElement.scrollW
     await panel.waitFor();
     assert.equal(await garage.getByRole("region", { name: "팀원과 출퇴근" }).count(), 0, "The team card left the garage column.");
     const tops = [];
-    for (const locator of [calendar, panel, page.getByTestId("healing-place"), page.getByTestId("project-list")]) tops.push((await locator.boundingBox()).y);
+    for (const locator of [calendar, panel, page.getByTestId("healing-open"), page.getByTestId("project-list")]) tops.push((await locator.boundingBox()).y);
     assert.deepEqual([...tops].sort((a, b) => a - b), tops, `Phone order must be calendar, team, healing, projects (got ${tops.join(", ")}).`);
 
     // 2. Calendar controls are big enough to tap.
