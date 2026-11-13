@@ -14,9 +14,12 @@ export interface RunnerFrame {
 
 /** Ground line (y = 0) sits this far down the field; leaves ≥ 3 m below for the water at 9 m view height. */
 const GROUND_SHARE = 0.65;
-const BODY_W_M = 0.6;
-const BODY_H_M = 1.7;
-const HEAD_R_M = 0.22;
+/** Chibi look (m). Total height stays about 1.7 m like the engine body. */
+const CHIBI = {
+  LEG_M: 0.3, BODY_RX_M: 0.3, BODY_RY_M: 0.28, HEAD_CY_M: 1.22, HEAD_R_M: 0.46,
+  STRIDE_PER_M: 0.9, BOB_M: 0.05,
+  SKIN: "#f8dcc4", HAIR: "#4a3328", EYE: "#2a1e1a", BLUSH: "#f4a3a8", SHOE: "#3b3f4a",
+} as const;
 const COIN_DRAW_R_M = 0.3;
 const EDGE_M = 0.15;
 const WATER_SURFACE_M = RUNNER.WATER_Y * 0.5;
@@ -211,16 +214,59 @@ function paintCoins(v: View, state: RunnerState): void {
   }
 }
 
+function oval(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number): void {
+  ctx.beginPath();
+  ctx.ellipse(x, y, Math.max(0.5, rx), Math.max(0.5, ry), 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/** Chibi runner (drawing only; the engine hit box is unchanged). Feet at (x, y), facing right. */
 function paintRunnerBody(v: View, state: RunnerState, color: string): void {
   const { ctx, k } = v;
-  const feetX = sx(v, state.x);
-  const feetY = sy(v, state.y);
+  const air = state.phase === "running" && !state.grounded;
+  // Run cycle follows distance, so it stops when the game stops.
+  const cycle = state.x * CHIBI.STRIDE_PER_M * Math.PI * 2;
+  const swing = air ? 0 : Math.sin(cycle);
+  const bob = air ? 0 : Math.abs(Math.cos(cycle)) * CHIBI.BOB_M;
+  const fx = sx(v, state.x);
+  const fy = sy(v, state.y) - bob * k;
+  const m = (meters: number) => meters * k;
+  // Legs: alternate on the ground, tucked in the air.
+  ctx.fillStyle = CHIBI.SHOE;
+  const legs: readonly number[] = air ? [-0.12, 0.16] : [swing * 0.18, -swing * 0.18];
+  legs.forEach((dx, i) => {
+    const lift = air ? (i === 0 ? 0.12 : 0.2) : Math.max(0, (i === 0 ? swing : -swing)) * 0.1;
+    rect(ctx, fx + m(dx - 0.09), fy - m(CHIBI.LEG_M + lift), m(0.18), m(CHIBI.LEG_M));
+  });
+  // Body (my colour) and hands.
   ctx.fillStyle = color;
-  ctx.fillRect(feetX - (BODY_W_M / 2) * k, feetY - BODY_H_M * k, BODY_W_M * k, BODY_H_M * k);
-  ctx.fillStyle = "#f3d2b3";
+  oval(ctx, fx, fy - m(CHIBI.LEG_M + CHIBI.BODY_RY_M), m(CHIBI.BODY_RX_M), m(CHIBI.BODY_RY_M));
+  ctx.fillStyle = CHIBI.SKIN;
+  const armY = fy - m(CHIBI.LEG_M + CHIBI.BODY_RY_M * 1.1);
+  const armUp = air ? 0.22 : 0;
+  oval(ctx, fx + m(-swing * 0.22 - 0.2), armY - m(armUp), m(0.08), m(0.08));
+  oval(ctx, fx + m(swing * 0.22 + 0.24), armY - m(armUp), m(0.08), m(0.08));
+  // Big head, hair cap with a tuft, eyes and blush.
+  const hy = fy - m(CHIBI.HEAD_CY_M);
+  const r = m(CHIBI.HEAD_R_M);
+  ctx.fillStyle = CHIBI.SKIN;
+  oval(ctx, fx, hy, r, r * 0.95);
+  ctx.fillStyle = CHIBI.HAIR;
   ctx.beginPath();
-  ctx.arc(feetX, feetY - (BODY_H_M + HEAD_R_M) * k, HEAD_R_M * k, 0, Math.PI * 2);
+  ctx.ellipse(fx - r * 0.08, hy - r * 0.15, r * 1.02, r * 0.85, 0, Math.PI, Math.PI * 2);
   ctx.fill();
+  oval(ctx, fx - r * 0.75, hy - r * 0.05, r * 0.3, r * 0.45);
+  oval(ctx, fx - r * 0.1, hy - r * 1.0, r * 0.18, r * 0.22);
+  ctx.fillStyle = CHIBI.EYE;
+  const eyeR = Math.max(1, r * 0.11);
+  const blink = Math.sin(state.time * 1.7) > 0.985;
+  for (const ex of [0.2, 0.58]) {
+    if (blink) rect(ctx, fx + r * ex - eyeR, hy + r * 0.12, eyeR * 2, Math.max(1, eyeR * 0.5));
+    else oval(ctx, fx + r * ex, hy + r * 0.15, eyeR, eyeR * 1.25);
+  }
+  ctx.fillStyle = CHIBI.BLUSH;
+  oval(ctx, fx + r * 0.05, hy + r * 0.45, r * 0.14, r * 0.08);
+  oval(ctx, fx + r * 0.78, hy + r * 0.45, r * 0.12, r * 0.08);
 }
 
 /** After a fall: water over the runner, droplets and a widening ring for the restart-lock time. */
